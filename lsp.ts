@@ -582,6 +582,20 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("tool_result", async (event, ctx) => {
+    if (event.toolName === "lsp") {
+      const input = (event.input && typeof event.input === "object")
+        ? event.input as Record<string, unknown>
+        : {};
+      if (input.action === "restart") {
+        const target = typeof input.server === "string" ? input.server.trim() : "";
+        if (!target || target === "all") activeClients.clear();
+        else activeClients.delete(target);
+        setActivity("idle");
+        updateLspStatus();
+      }
+      return;
+    }
+
     if (event.toolName !== "write" && event.toolName !== "edit") return;
 
     const filePath = event.input.path as string;

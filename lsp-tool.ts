@@ -29,7 +29,7 @@ import { Type, type Static } from "@sinclair/typebox";
 import { StringEnum } from "@mariozechner/pi-ai";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
-import { getOrCreateManager, formatDiagnostic, filterDiagnosticsBySeverity, uriToPath, resolvePosition, collectSymbols, type SeverityFilter } from "./lsp-core.js";
+import { getOrCreateManager, shutdownManager, LSP_SERVERS, formatDiagnostic, filterDiagnosticsBySeverity, uriToPath, resolvePosition, collectSymbols, type SeverityFilter } from "./lsp-core.js";
 
 const PREVIEW_LINES = 10;
 
@@ -44,8 +44,9 @@ function diagnosticsWaitMsForFile(filePath: string): number {
   return DIAGNOSTICS_WAIT_MS_DEFAULT;
 }
 
-const ACTIONS = ["definition", "references", "hover", "symbols", "diagnostics", "workspace-diagnostics", "signature", "rename", "codeAction"] as const;
+const ACTIONS = ["definition", "references", "hover", "symbols", "diagnostics", "workspace-diagnostics", "signature", "rename", "codeAction", "restart", "servers"] as const;
 const SEVERITY_FILTERS = ["all", "error", "warning", "info", "hint"] as const;
+const SERVER_IDS = new Set(LSP_SERVERS.map((s) => s.id));
 
 const LspParams = Type.Object({
   action: StringEnum(ACTIONS),
@@ -58,6 +59,7 @@ const LspParams = Type.Object({
   query: Type.Optional(Type.String({ description: "Symbol name filter (for symbols) or to resolve position (for definition/references/hover/signature)" })),
   newName: Type.Optional(Type.String({ description: "New name for rename action" })),
   severity: Type.Optional(StringEnum(SEVERITY_FILTERS, { description: 'Filter diagnostics: "all"|"error"|"warning"|"info"|"hint"' })),
+  server: Type.Optional(Type.String({ description: 'For action="restart": server id (e.g. "clangd") or "all" (default).' })),
 });
 
 type LspParamsType = Static<typeof LspParams>;
@@ -216,7 +218,7 @@ export default function (pi: ExtensionAPI) {
     label: "LSP",
     description: `Query language server for definitions, references, types, symbols, diagnostics, rename, and code actions.
 
-Actions: definition, references, hover, signature, rename (require file + line/column or query), symbols (file, optional query), diagnostics (file), workspace-diagnostics (files array), codeAction (file + position).
+Actions: definition, references, hover, signature, rename (require file + line/column or query), symbols (file, optional query), diagnostics (file), workspace-diagnostics (files array), codeAction (file + position), restart (restart LSP servers; optional server="clangd"|...|"all"), servers (list server ids).
 Use bash to find files: find src -name "*.ts" -type f`,
     parameters: LspParams,
 
@@ -224,12 +226,43 @@ Use bash to find files: find src -name "*.ts" -type f`,
       const { signal, onUpdate, ctx } = normalizeExecuteArgs(onUpdateArg, ctxArg, signalArg);
       if (signal?.aborted) return cancelledToolResult();
       const manager = getOrCreateManager(ctx.cwd);
-      const { action, file, files, line, column, endLine, endColumn, query, newName, severity } = params as LspParamsType;
+      const { action, file, files, line, column, endLine, endColumn, query, newName, severity, server } = params as LspParamsType;
       const sevFilter: SeverityFilter = severity || "all";
-      const needsFile = action !== "workspace-diagnostics";
+      const needsFile = action !== "workspace-diagnostics" && action !== "restart" && action !== "servers";
       const needsPos = ["definition", "references", "hover", "signature", "rename", "codeAction"].includes(action);
 
       try {
+        if (action === "servers") {
+          const ids = Array.from(SERVER_IDS).sort();
+          return {
+            content: [{ type: "text", text: `action: servers\n${ids.join("\n")}` }],
+            details: { servers: ids },
+          };
+        }
+
+        if (action === "restart") {
+          const target = (server || "all").trim();
+          if (target !== "all" && !SERVER_IDS.has(target)) {
+            throw new Error(`Unknown server "${target}". Use one of: all, ${Array.from(SERVER_IDS).join(", ")}`);
+          }
+
+          if (target === "all") {
+            await abortable(shutdownManager(), signal);
+            // Recreate manager immediately so follow-up actions are responsive.
+            getOrCreateManager(ctx.cwd);
+            return {
+              content: [{ type: "text", text: "action: restart\nserver: all\nLSP manager restarted." }],
+              details: { restarted: true, server: "all" },
+            };
+          }
+
+          const restartedCount = await abortable(manager.restartServers([target]), signal);
+          return {
+            content: [{ type: "text", text: `action: restart\nserver: ${target}\nRestarted ${restartedCount} client(s).` }],
+            details: { restarted: true, server: target, restartedCount },
+          };
+        }
+
         if (needsFile && !file) throw new Error(`Action "${action}" requires a file path.`);
 
         let rLine = line, rCol = column, fromQuery = false;
@@ -333,6 +366,7 @@ Use bash to find files: find src -name "*.ts" -type f`,
       if (params.query) text += " " + theme.fg("dim", `query="${params.query}"`);
       else if (params.line !== undefined && params.column !== undefined) text += theme.fg("warning", `:${params.line}:${params.column}`);
       if (params.severity && params.severity !== "all") text += " " + theme.fg("dim", `[${params.severity}]`);
+      if (params.server) text += " " + theme.fg("dim", `server=${params.server}`);
       return new Text(text, 0, 0);
     },
 

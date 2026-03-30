@@ -138,6 +138,72 @@ function findRoot(file: string, cwd: string, markers: string[]): string | undefi
   return found ? path.dirname(found) : undefined;
 }
 
+function detectClangdCompilationDatabaseSetting(root: string): { none: true } | { dir: string } | undefined {
+  const configPath = path.join(root, ".clangd");
+  if (!fs.existsSync(configPath)) return undefined;
+
+  try {
+    const content = fs.readFileSync(configPath, "utf-8");
+    const match = content.match(/(?:^|\n)\s*CompilationDatabase\s*:\s*([^\n#]+)/i);
+    if (!match) return undefined;
+
+    const rawValue = match[1].trim().replace(/^['\"]|['\"]$/g, "");
+    if (!rawValue) return undefined;
+    if (rawValue.toLowerCase() === "none") return { none: true };
+
+    const resolved = path.isAbsolute(rawValue) ? rawValue : path.resolve(root, rawValue);
+
+    // clangd expects --compile-commands-dir to point to a directory.
+    if (fs.existsSync(path.join(resolved, "compile_commands.json"))) return { dir: resolved };
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function findCompileCommandsDir(root: string): string | undefined {
+  if (fs.existsSync(path.join(root, "compile_commands.json"))) return root;
+
+  const baseCandidates = ["build", "Build", "out", "Out", "cmake-build-debug", "cmake-build-release", "cmake-build-relwithdebinfo", "cmake-build-minsizerel"];
+  for (const base of baseCandidates) {
+    const dir = path.join(root, base);
+    if (fs.existsSync(path.join(dir, "compile_commands.json"))) return dir;
+  }
+
+  const oneLevelBases = ["build", "Build", "out", "Out"];
+  const found: Array<{ dir: string; mtimeMs: number }> = [];
+
+  for (const base of oneLevelBases) {
+    const baseDir = path.join(root, base);
+    if (!fs.existsSync(baseDir)) continue;
+
+    let entries: fs.Dirent[] = [];
+    try {
+      entries = fs.readdirSync(baseDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const e of entries) {
+      if (!e.isDirectory()) continue;
+      const dir = path.join(baseDir, e.name);
+      const cdb = path.join(dir, "compile_commands.json");
+      if (!fs.existsSync(cdb)) continue;
+
+      try {
+        const st = fs.statSync(cdb);
+        found.push({ dir, mtimeMs: st.mtimeMs });
+      } catch {
+        found.push({ dir, mtimeMs: 0 });
+      }
+    }
+  }
+
+  if (!found.length) return undefined;
+  found.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return found[0].dir;
+}
+
 function timeout<T>(promise: Promise<T>, ms: number, name: string): Promise<T> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`${name} timed out`)), ms);
@@ -432,12 +498,17 @@ export const LSP_SERVERS: LSPServerConfig[] = [
     spawn: async (root) => {
       const clangd = which("clangd");
       if (!clangd) return undefined;
-      const args = [
-        "--clang-tidy",
-        "--header-insertion=iwyu",
-        "--background-index",
-        `--compile-commands-dir=${root}`,
-      ];
+
+      const args = ["--clang-tidy", "--header-insertion=iwyu", "--background-index"];
+
+      const explicitDb = detectClangdCompilationDatabaseSetting(root);
+      if (explicitDb && "dir" in explicitDb) {
+        args.push(`--compile-commands-dir=${explicitDb.dir}`);
+      } else if (!explicitDb || !("none" in explicitDb)) {
+        const autoDb = findCompileCommandsDir(root);
+        if (autoDb) args.push(`--compile-commands-dir=${autoDb}`);
+      }
+
       return { process: spawn(clangd, args, { cwd: root, stdio: ["pipe", "pipe", "pipe"] }) };
     },
   },
@@ -873,6 +944,10 @@ export class LSPManager {
     const langId = this.langId(absPath);
     const isNew = clients.some(c => !c.openFiles.has(absPath));
 
+    // Avoid returning stale diagnostics from a previous request. We only want
+    // diagnostics produced after this touch/open/change cycle.
+    for (const c of clients) c.diagnostics.delete(absPath);
+
     const waits = clients.map(c => this.waitForDiagnostics(c, absPath, timeoutMs, isNew));
     await this.openOrUpdate(clients, absPath, uri, langId, content);
     const results = await Promise.all(waits);
@@ -883,7 +958,6 @@ export class LSPManager {
       const d = c.diagnostics.get(absPath);
       if (d) diags.push(...d);
     }
-    if (!responded && clients.some(c => c.diagnostics.has(absPath))) responded = true;
 
     // If we didn't get pushed diagnostics (common for some servers), try pull diagnostics.
     if (!responded || diags.length === 0) {
@@ -938,6 +1012,9 @@ export class LSPManager {
         }
       }
 
+      // Avoid surfacing stale cached diagnostics in batch runs.
+      for (const c of clients) c.diagnostics.delete(absPath);
+
       const waits = clients.map(c => this.waitForDiagnostics(c, absPath, timeoutMs, isNew));
       await this.openOrUpdate(clients, absPath, uri, langId, content, false);
       const waitResults = await Promise.all(waits);
@@ -945,7 +1022,7 @@ export class LSPManager {
       const diags: Diagnostic[] = [];
       for (const c of clients) { const d = c.diagnostics.get(absPath); if (d) diags.push(...d); }
 
-      let responded = waitResults.some(r => r) || diags.length > 0;
+      let responded = waitResults.some(r => r);
 
       if (!responded || diags.length === 0) {
         const pulled = await Promise.all(clients.map(c => this.pullDiagnostics(c, absPath, uri)));
@@ -1096,25 +1173,60 @@ export class LSPManager {
     return true;
   }
 
+  private async stopClient(c: LSPClient): Promise<void> {
+    const wasClosed = c.closed;
+    c.closed = true;
+    if (!wasClosed) {
+      try {
+        await Promise.race([
+          c.connection.sendRequest("shutdown"),
+          new Promise(r => setTimeout(r, 1000))
+        ]);
+      } catch {}
+      try { void c.connection.sendNotification("exit").catch(() => {}); } catch {}
+    }
+    try { c.connection.end(); } catch {}
+    try { c.process.kill(); } catch {}
+  }
+
+  async restartServers(serverIds?: string[]): Promise<number> {
+    const ids = new Set((serverIds || []).filter(Boolean));
+    if (ids.size === 0) return 0;
+
+    const matches = (key: string) => {
+      const idx = key.indexOf(":");
+      const id = idx === -1 ? key : key.slice(0, idx);
+      return ids.has(id);
+    };
+
+    let restarted = 0;
+    const targets = Array.from(this.clients.entries()).filter(([key]) => matches(key));
+
+    for (const [key, client] of targets) {
+      this.clients.delete(key);
+      this.broken.delete(key);
+      this.spawning.delete(key);
+      restarted++;
+      await this.stopClient(client);
+    }
+
+    for (const key of Array.from(this.broken)) {
+      if (matches(key)) this.broken.delete(key);
+    }
+    for (const key of Array.from(this.spawning.keys())) {
+      if (matches(key)) this.spawning.delete(key);
+    }
+
+    return restarted;
+  }
+
   async shutdown() {
     if (this.cleanupTimer) { clearInterval(this.cleanupTimer); this.cleanupTimer = null; }
     const clients = Array.from(this.clients.values());
     this.clients.clear();
-    for (const c of clients) {
-      const wasClosed = c.closed;
-      c.closed = true;
-      if (!wasClosed) {
-        try {
-          await Promise.race([
-            c.connection.sendRequest("shutdown"),
-            new Promise(r => setTimeout(r, 1000))
-          ]);
-        } catch {}
-        try { void c.connection.sendNotification("exit").catch(() => {}); } catch {}
-      }
-      try { c.connection.end(); } catch {}
-      try { c.process.kill(); } catch {}
-    }
+    this.spawning.clear();
+    this.broken.clear();
+    for (const c of clients) await this.stopClient(c);
   }
 }
 
