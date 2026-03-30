@@ -1,51 +1,73 @@
-# LSP Extension
+# LSP Extension for pi-coding-agent
 
-Language Server Protocol integration for pi-coding-agent.
+[English](./README.md) | [中文](./README.zh.md)
 
-## Highlights
+Language Server Protocol integration for **pi-coding-agent**.
 
-- **Hook** (`lsp.ts`): Auto-diagnostics (default at agent end; optional per `write`/`edit`)
-- **Tool** (`lsp-tool.ts`): On-demand LSP queries (definitions, references, hover, symbols, diagnostics, signatures)
-- Manages one LSP server per project root and reuses them across turns
-- **Efficient**: Bounded memory usage via LRU cache and idle file cleanup
-- Supports TypeScript/JavaScript, Vue, Svelte, Dart/Flutter, Python, Go, Kotlin, Swift, Rust, and C/C++
+> Provides both:
+> - a **Hook extension** (`lsp.ts`) for automatic diagnostics, and
+> - a **Tool extension** (`lsp-tool.ts`) for on-demand LSP queries.
+
+---
+
+## Table of Contents
+
+- [Features](#features)
+- [Supported Languages](#supported-languages)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Usage](#usage)
+  - [Hook (Auto Diagnostics)](#hook-auto-diagnostics)
+  - [Tool (`lsp`)](#tool-lsp)
+- [Settings](#settings)
+- [Recent Core Improvements](#recent-core-improvements)
+- [Project Structure](#project-structure)
+- [Testing](#testing)
+- [Known Limitations](#known-limitations)
+- [License](#license)
+
+---
+
+## Features
+
+- **Automatic diagnostics** via hook (`lsp.ts`)
+  - Default mode: run diagnostics at **agent end**
+  - Optional mode: run diagnostics after each `write`/`edit`
+- **On-demand LSP tool** (`lsp-tool.ts`)
+  - definition, references, hover, signature, symbols
+  - diagnostics, workspace diagnostics
+  - rename, code actions
+- **Multi-language support** including C/C++, Rust, Swift, Kotlin, TS/JS, etc.
+- **Efficient runtime behavior**
+  - one LSP server per project root
+  - server reuse across turns
+  - idle file cleanup + LRU open-file cap
+  - idle server shutdown and lazy restart
+- **Robust diagnostics retrieval**
+  - supports both push diagnostics (`publishDiagnostics`) and pull diagnostics (`textDocument/diagnostic`, `workspace/diagnostic`)
+
+---
 
 ## Supported Languages
 
-| Language | Server | Detection |
-|----------|--------|-----------|
-| TypeScript/JavaScript | `typescript-language-server` | `package.json`, `tsconfig.json` |
-| Vue | `vue-language-server` | `package.json`, `vite.config.ts` |
-| Svelte | `svelteserver` | `svelte.config.js` |
-| Dart/Flutter | `dart language-server` | `pubspec.yaml` |
-| Python | `pyright-langserver` | `pyproject.toml`, `requirements.txt` |
-| Go | `gopls` | `go.mod` |
-| Kotlin | `kotlin-ls` | `settings.gradle(.kts)`, `build.gradle(.kts)`, `pom.xml` |
-| Swift | `sourcekit-lsp` | `Package.swift`, Xcode (`*.xcodeproj` / `*.xcworkspace`) |
+| Language | LSP Server | Root Detection Markers |
+|---|---|---|
+| TypeScript / JavaScript | `typescript-language-server` | `package.json`, `tsconfig.json`, `jsconfig.json` |
+| Vue | `vue-language-server` | `package.json`, `vite.config.ts`, `vite.config.js` |
+| Svelte | `svelteserver` | `package.json`, `svelte.config.js` |
+| Dart / Flutter | `dart language-server` | `pubspec.yaml`, `analysis_options.yaml` |
+| Python | `pyright-langserver` | `pyproject.toml`, `setup.py`, `requirements.txt`, `pyrightconfig.json` |
+| Go | `gopls` | `go.work`, `go.mod` |
+| Kotlin | `kotlin-lsp` (preferred) / `kotlin-language-server` | `settings.gradle(.kts)`, `build.gradle(.kts)`, `pom.xml`, `gradlew` |
+| Swift | `sourcekit-lsp` | `Package.swift`, `*.xcodeproj`, `*.xcworkspace` |
 | Rust | `rust-analyzer` | `Cargo.toml` |
-| C/C++ | `clangd` | `compile_commands.json`, `CMakeLists.txt`, `Makefile`, `.git` |
+| C / C++ | `clangd` | `compile_commands.json`, `CMakeLists.txt`, `Makefile`, `.git`, etc. |
 
-### Known Limitations
+---
 
-**rust-analyzer**: Very slow to initialize (30-60+ seconds) because it compiles the entire Rust project before returning diagnostics. This is a known rust-analyzer behavior, not a bug in this extension. For quick feedback, consider using `cargo check` directly.
+## Requirements
 
-**clangd**: Requires `compile_commands.json` for best results in non-trivial projects. CMake users can generate it via `cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON ..`. For simple projects without a build system, clangd will attempt best-effort parsing. Install via your system's package manager (`sudo apt install clangd`, `brew install llvm`, etc.).
-
-## Usage
-
-### Installation
-
-Install the package and enable extensions:
-```bash
-pi install npm:lsp-pi
-pi config
-```
-
-Dependencies are installed automatically during `pi install`.
-
-### Prerequisites
-
-Install the language servers you need:
+Install the language servers you need (examples):
 
 ```bash
 # TypeScript/JavaScript
@@ -60,95 +82,115 @@ npm i -g svelte-language-server
 # Python
 npm i -g pyright
 
-# Go (install gopls via go install)
+# Go
 go install golang.org/x/tools/gopls@latest
 
-# Kotlin (kotlin-ls)
-brew install JetBrains/utils/kotlin-lsp
+# Kotlin (preferred)
+# See Kotlin/kotlin-lsp release/docs for your platform
 
-# Swift (sourcekit-lsp; macOS)
-# Usually available via Xcode / Command Line Tools
+# Swift (macOS)
 xcrun sourcekit-lsp --help
 
-# Rust (install via rustup)
+# Rust
 rustup component add rust-analyzer
 
-# C/C++ (clangd)
+# C/C++
 # macOS
-brew install llvm  # or: xcode-select --install (Xcode Command Line Tools)
-# Linux (Debian/Ubuntu)
+brew install llvm
+# Ubuntu/Debian
 sudo apt install clangd
-# Linux (Arch)
+# Arch
 sudo pacman -S clang
-# Windows - install LLVM from https://releases.llvm.org/
+# Windows
+# Install LLVM / clangd and ensure clangd is in PATH
 ```
 
-The extension spawns binaries from your PATH.
+> The extension resolves binaries from `PATH`.
 
-## How It Works
+---
 
-### Hook (auto-diagnostics)
-
-1. On `session_start`, warms up LSP for detected project type
-2. Tracks files touched by `write`/`edit`
-3. Default (`agent_end`): at agent end, sends touched files to LSP and posts a diagnostics message
-4. Optional (`edit_write`): per `write`/`edit`, appends diagnostics to the tool result
-5. Shows notification with diagnostic summary
-6. **Memory Management**: Keeps up to 30 files open per LSP server (LRU eviction), automatically closes idle files (> 60s), and shuts down all LSP servers after 2 minutes of post-agent inactivity (servers restart lazily when files are read again).
-7. **Robustness**: Reuses cached diagnostics if a server doesn't re-publish them for unchanged files, avoiding false timeouts on re-analysis.
-
-### Tool (on-demand queries)
-
-The `lsp` tool provides these actions:
-
-| Action | Description | Requires |
-|--------|-------------|----------|
-| `definition` | Jump to definition | `file` + (`line`/`column` or `query`) |
-| `references` | Find all references | `file` + (`line`/`column` or `query`) |
-| `hover` | Get type/docs info | `file` + (`line`/`column` or `query`) |
-| `symbols` | List symbols in file | `file`, optional `query` filter |
-| `diagnostics` | Get single file diagnostics | `file`, optional `severity` filter |
-| `workspace-diagnostics` | Get diagnostics for multiple files | `files` array, optional `severity` filter |
-| `signature` | Get function signature | `file` + (`line`/`column` or `query`) |
-| `rename` | Rename symbol across files | `file` + (`line`/`column` or `query`) + `newName` |
-| `codeAction` | Get available quick fixes/refactors | `file` + `line`/`column`, optional `endLine`/`endColumn` |
-
-**Query resolution**: For position-based actions, you can provide a `query` (symbol name) instead of `line`/`column`. The tool will find the symbol in the file and use its position.
-
-**Severity filtering**: For `diagnostics` and `workspace-diagnostics` actions, use the `severity` parameter to filter results:
-- `all` (default): Show all diagnostics
-- `error`: Only errors
-- `warning`: Errors and warnings
-- `info`: Errors, warnings, and info
-- `hint`: All including hints
-
-**Workspace diagnostics**: The `workspace-diagnostics` action analyzes multiple files at once. Pass an array of file paths in the `files` parameter. Each file will be opened, analyzed by the appropriate LSP server, and diagnostics returned. Files are cleaned up after analysis to prevent memory bloat.
+## Installation
 
 ```bash
-# Find all TypeScript files and check for errors
-find src -name "*.ts" -type f | xargs ...
-
-# Example tool call
-lsp action=workspace-diagnostics files=["src/index.ts", "src/utils.ts"] severity=error
+pi install npm:lsp-pi
+pi config
 ```
 
-Example questions the LLM can answer using this tool:
-- "Where is `handleSessionStart` defined in `lsp-hook.ts`?"
-- "Find all references to `getManager`"
-- "What type does `getDefinition` return?"
-- "List symbols in `lsp-core.ts`"
-- "Check all TypeScript files in src/ for errors"
-- "Get only errors from `index.ts`"
-- "Rename `oldFunction` to `newFunction`"
-- "What quick fixes are available at line 10?"
+`package.json` includes both extensions:
+
+- `./lsp.ts`
+- `./lsp-tool.ts`
+
+---
+
+## Usage
+
+### Hook (Auto Diagnostics)
+
+The hook extension (`lsp.ts`) automatically checks files touched by `write`/`edit`.
+
+Behavior:
+
+1. On `session_start`, it warms up LSP for detected project type.
+2. It tracks touched files during agent execution.
+3. In default mode (`agent_end`), it runs diagnostics once after the response is complete.
+4. In `edit_write` mode, it appends diagnostics immediately after each `write`/`edit`.
+5. It manages resources automatically (LRU file eviction, idle close, idle server shutdown).
+
+### Tool (`lsp`)
+
+The `lsp` tool provides on-demand language intelligence.
+
+| Action | Description | Required Parameters |
+|---|---|---|
+| `definition` | Go to definition | `file` + (`line`/`column` or `query`) |
+| `references` | Find references | `file` + (`line`/`column` or `query`) |
+| `hover` | Hover info (type/docs) | `file` + (`line`/`column` or `query`) |
+| `signature` | Signature help | `file` + (`line`/`column` or `query`) |
+| `symbols` | List document symbols | `file` (optional `query`) |
+| `diagnostics` | Diagnostics for one file | `file` (optional `severity`) |
+| `workspace-diagnostics` | Diagnostics for multiple files | `files[]` (optional `severity`) |
+| `rename` | Rename symbol | `file` + (`line`/`column` or `query`) + `newName` |
+| `codeAction` | Quick fixes/refactors | `file` + `line`/`column` (optional range end) |
+
+Severity filter values:
+
+- `all` (default)
+- `error`
+- `warning`
+- `info`
+- `hint`
+
+Examples:
+
+```bash
+# Check one file
+lsp action=diagnostics file=src/main.cpp severity=error
+
+# Check multiple files
+lsp action=workspace-diagnostics files=["src/a.ts","src/b.ts"] severity=warning
+
+# Find symbol position by name (query-based)
+lsp action=definition file=lsp-core.ts query=getOrCreateManager
+```
+
+---
 
 ## Settings
 
-Use `/lsp` to configure the auto diagnostics hook:
-- Mode: default at agent end; can run after each edit/write or be disabled
-- Scope: session-only or global (`~/.pi/agent/settings.json`)
+Use `/lsp` in the UI to configure hook mode:
 
-To disable auto diagnostics, choose "Disabled" in `/lsp` or set in `~/.pi/agent/settings.json`:
+- `agent_end` (default)
+- `edit_write`
+- `disabled`
+
+Scope:
+
+- `session` only
+- `global` (`~/.pi/agent/settings.json`)
+
+Global config example:
+
 ```json
 {
   "lsp": {
@@ -156,34 +198,72 @@ To disable auto diagnostics, choose "Disabled" in `/lsp` or set in `~/.pi/agent/
   }
 }
 ```
-Other values: `"agent_end"` (default) and `"edit_write"`.
 
-Agent-end mode analyzes files touched during the full agent response (after all tool calls complete) and posts a diagnostics message only once. Disabling the hook does not disable the `/lsp` tool.
+> Disabling hook mode does **not** disable the `lsp` tool.
 
-## File Structure
+---
+
+## Recent Core Improvements
+
+### `lsp.ts` (Hook)
+
+- Default behavior optimized to `agent_end` for cleaner output.
+- Added `/lsp` mode + scope configuration flow.
+- Added per-language diagnostics wait tuning (including C/C++, Rust, Kotlin, Swift).
+- Added warm-up markers for more project types (including C/C++).
+- Improved lifecycle robustness (abort-aware batching, idle shutdown scheduling).
+
+### `lsp-core.ts` (Manager)
+
+- Expanded and hardened server/root handling for Kotlin, Swift, Rust, C/C++.
+- Added safer process startup with fallback probes.
+- Combined push + pull diagnostics strategy for better reliability.
+- Added bounded memory strategy (max open files, LRU eviction, idle close).
+- Improved cross-platform file URI mapping (`fileURLToPath` first).
+- Improved clangd startup with `--compile-commands-dir=<root>`.
+
+### `lsp-tool.ts` (Tool)
+
+- Added and refined actions: `workspace-diagnostics`, `rename`, `codeAction`, `signature`.
+- Added severity filtering and query-based position resolution.
+- Added runtime execute-signature compatibility shim.
+- Added cancellation-safe execution and improved rendering.
+
+---
+
+## Project Structure
 
 | File | Purpose |
-|------|---------|
-| `lsp.ts` | Hook extension (auto-diagnostics; default at agent end) |
-| `lsp-tool.ts` | Tool extension (on-demand LSP queries) |
-| `lsp-core.ts` | LSPManager class, server configs, singleton manager |
-| `package.json` | Declares both extensions via "pi" field |
+|---|---|
+| `lsp.ts` | Hook extension (automatic diagnostics) |
+| `lsp-tool.ts` | Tool extension (interactive LSP actions) |
+| `lsp-core.ts` | Shared LSP manager + server configuration + utilities |
+| `package.json` | Extension registration and dependencies |
+
+---
 
 ## Testing
 
 ```bash
-# Unit tests (root detection, configuration)
+# Root/config/unit tests
 npm test
 
-# Tool tests
+# Tool-focused tests
 npm run test:tool
 
-# Integration tests (spawns real language servers)
+# Integration tests (real language servers)
 npm run test:integration
-
-# Run rust-analyzer tests (slow, disabled by default)
-RUST_LSP_TEST=1 npm run test:integration
 ```
+
+---
+
+## Known Limitations
+
+- **rust-analyzer** can be slow to initialize for non-trivial projects.
+- **clangd** works best with `compile_commands.json`.
+- For very large repositories, first-run indexing may take noticeable time.
+
+---
 
 ## License
 
