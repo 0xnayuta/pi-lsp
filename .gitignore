@@ -5,3 +5,41 @@ test.dart
 lib/
 *.log
 .vs/
+
+# Node/TypeScript common outputs
+dist/
+build/
+coverage/
+.cache/
+*.tsbuildinfo
+
+# Environment / editor
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# C/C++ test workspace artifacts (cpp-test)
+cpp-test/.cache/
+cpp-test/.clangd
+cpp-test/.vs/
+cpp-test/compile_commands.json
+cpp-test/CMakeFiles/
+cpp-test/CMakeCache.txt
+cpp-test/cmake_install.cmake
+cpp-test/Makefile
+cpp-test/build/
+cpp-test/cmake-build-*/
+
+# Generic C/C++ build outputs
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.exe

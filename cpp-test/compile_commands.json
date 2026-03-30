@@ -1,12 +1,12 @@
 [
   {
-    "directory": "D:/Source/repos/cpp-lsp-test",
-    "command": "g++ -std=c++17 -I./include -c src/main.cpp -o build/main.o",
-    "file": "D:/Source/repos/cpp-lsp-test/src/main.cpp"
+    "command": "clang++ -std=c++17 -Iinclude -c src/main.cpp -o build/main.o",
+    "directory": "E:/Source/repos/pi-lsp/cpp-test",
+    "file": "src/main.cpp"
   },
   {
-    "directory": "D:/Source/repos/cpp-lsp-test",
-    "command": "g++ -std=c++17 -I./include -c src/mylib.cpp -o build/mylib.o",
-    "file": "D:/Source/repos/cpp-lsp-test/src/mylib.cpp"
+    "command": "clang++ -std=c++17 -Iinclude -c src/mylib.cpp -o build/mylib.o",
+    "directory": "E:/Source/repos/pi-lsp/cpp-test",
+    "file": "src/mylib.cpp"
   }
 ]

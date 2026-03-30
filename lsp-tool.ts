@@ -40,6 +40,7 @@ function diagnosticsWaitMsForFile(filePath: string): number {
   if (ext === ".kt" || ext === ".kts") return 30000;
   if (ext === ".swift") return 20000;
   if (ext === ".rs") return 20000;
+  if ([".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".hxx", ".inc"].includes(ext)) return 20000;
   return DIAGNOSTICS_WAIT_MS_DEFAULT;
 }
 

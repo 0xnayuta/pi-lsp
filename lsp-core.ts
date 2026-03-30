@@ -27,7 +27,7 @@ import {
   DocumentSymbolRequest,
   RenameRequest,
   CodeActionRequest,
-} from "vscode-languageserver-protocol/node.js";
+} from "vscode-languageserver-protocol";
 import {
   type Diagnostic,
   type Location,
@@ -432,7 +432,12 @@ export const LSP_SERVERS: LSPServerConfig[] = [
     spawn: async (root) => {
       const clangd = which("clangd");
       if (!clangd) return undefined;
-      const args = ["--clang-tidy", "--header-insertion=iwyu", "--background-index"];
+      const args = [
+        "--clang-tidy",
+        "--header-insertion=iwyu",
+        "--background-index",
+        `--compile-commands-dir=${root}`,
+      ];
       return { process: spawn(clangd, args, { cwd: root, stdio: ["pipe", "pipe", "pipe"] }) };
     },
   },
@@ -552,11 +557,22 @@ export class LSPManager {
       };
 
       conn.onNotification("textDocument/publishDiagnostics", (params: { uri: string; diagnostics: Diagnostic[] }) => {
-        const fpRaw = decodeURIComponent(new URL(params.uri).pathname);
+        let fpRaw = params.uri;
+        try {
+          fpRaw = fileURLToPath(params.uri);
+        } catch {
+          try {
+            fpRaw = decodeURIComponent(new URL(params.uri).pathname);
+          } catch {
+            fpRaw = params.uri;
+          }
+        }
+
         const fp = normalizeFsPath(fpRaw);
 
         client.diagnostics.set(fp, params.diagnostics);
-        // Notify both raw and normalized paths (macOS often reports /private/var vs /var)
+        // Notify both raw and normalized paths (macOS often reports /private/var vs /var,
+        // Windows may differ in slash style/casing depending on server output).
         const listeners1 = client.listeners.get(fp);
         const listeners2 = fp !== fpRaw ? client.listeners.get(fpRaw) : undefined;
 
