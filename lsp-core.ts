@@ -719,9 +719,13 @@ export class LSPManager {
     return clients;
   }
 
-  private resolve(fp: string) {
+  resolveFilePath(fp: string) {
     const abs = path.isAbsolute(fp) ? fp : path.resolve(this.cwd, fp);
     return normalizeFsPath(abs);
+  }
+
+  private resolve(fp: string) {
+    return this.resolveFilePath(fp);
   }
   private langId(fp: string) { return LANGUAGE_IDS[path.extname(fp)] || "plaintext"; }
   private readFile(fp: string): string | null { try { return fs.readFileSync(fp, "utf-8"); } catch { return null; } }
@@ -1137,32 +1141,103 @@ export class LSPManager {
     const l = await this.loadFile(fp);
     if (!l) return [];
     await this.openOrUpdate(l.clients, l.absPath, l.uri, l.langId, l.content);
-    
+
     const start = this.toPos(startLine, startCol);
     const end = this.toPos(endLine ?? startLine, endCol ?? startCol);
-    const range = { start, end };
-    
-    // Get diagnostics for this range to include in context
-    const diagnostics: Diagnostic[] = [];
-    for (const c of l.clients) {
-      const fileDiags = c.diagnostics.get(l.absPath) || [];
-      for (const d of fileDiags) {
-        if (this.rangesOverlap(d.range, range)) diagnostics.push(d);
+    const primaryRange = { start, end };
+
+    const buildContextDiagnostics = (range: typeof primaryRange): Diagnostic[] => {
+      const diagnostics: Diagnostic[] = [];
+      for (const c of l.clients) {
+        const fileDiags = c.diagnostics.get(l.absPath) || [];
+        for (const d of fileDiags) {
+          if (this.rangesOverlap(d.range, range)) diagnostics.push(d);
+        }
+      }
+      return diagnostics;
+    };
+
+    const requestForRange = async (range: typeof primaryRange, diagnostics: Diagnostic[]): Promise<(CodeAction | Command)[]> => {
+      const results = await Promise.all(l.clients.map(async c => {
+        if (c.closed) return [];
+        try {
+          const r = await c.connection.sendRequest(CodeActionRequest.type, {
+            textDocument: { uri: l.uri },
+            range,
+            context: { diagnostics, only: [CodeActionKind.QuickFix, CodeActionKind.Refactor, CodeActionKind.Source] },
+          });
+          return r || [];
+        } catch {
+          return [];
+        }
+      }));
+      return results.flat();
+    };
+
+    const dedupeActions = (actions: (CodeAction | Command)[]): (CodeAction | Command)[] => {
+      const seen = new Set<string>();
+      const out: (CodeAction | Command)[] = [];
+      for (const action of actions) {
+        const title = (action as any)?.title || (action as any)?.command?.title || "";
+        const kind = (action as any)?.kind || (action as any)?.command?.command || "";
+        const key = `${title}::${kind}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(action);
+      }
+      return out;
+    };
+
+    const primaryDiagnostics = buildContextDiagnostics(primaryRange);
+    let actions = await requestForRange(primaryRange, primaryDiagnostics);
+
+    // clangd can be quite position-sensitive for quick fixes. If the initial
+    // request yields nothing useful, retry on the tightest overlapping
+    // diagnostic ranges and then on the full line.
+    const ext = path.extname(l.absPath).toLowerCase();
+    const isCpp = [".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".hxx", ".inc"].includes(ext);
+    const hasPreferredFixes = actions.some((a) => {
+      const kind = String((a as any)?.kind || "");
+      return kind === CodeActionKind.QuickFix || kind.startsWith(`${CodeActionKind.QuickFix}.`);
+    });
+
+    if (isCpp && (!actions.length || !hasPreferredFixes)) {
+      const overlappingDiagnostics = primaryDiagnostics
+        .slice()
+        .sort((a, b) => {
+          const aSpan = (a.range.end.line - a.range.start.line) * 10000 + (a.range.end.character - a.range.start.character);
+          const bSpan = (b.range.end.line - b.range.start.line) * 10000 + (b.range.end.character - b.range.start.character);
+          return aSpan - bSpan;
+        });
+
+      for (const diag of overlappingDiagnostics) {
+        const diagActions = await requestForRange(diag.range, [diag]);
+        if (diagActions.length) {
+          actions = dedupeActions([...diagActions, ...actions]);
+          const nowHasQuickFix = actions.some((a) => {
+            const kind = String((a as any)?.kind || "");
+            return kind === CodeActionKind.QuickFix || kind.startsWith(`${CodeActionKind.QuickFix}.`);
+          });
+          if (nowHasQuickFix) break;
+        }
+      }
+
+      if (!actions.length || !actions.some((a) => {
+        const kind = String((a as any)?.kind || "");
+        return kind === CodeActionKind.QuickFix || kind.startsWith(`${CodeActionKind.QuickFix}.`);
+      })) {
+        const lineText = l.content.split(/\r?\n/)[Math.max(0, start.line)] ?? "";
+        const lineRange = {
+          start: { line: start.line, character: 0 },
+          end: { line: start.line, character: Math.max(0, lineText.length) },
+        };
+        const lineDiagnostics = buildContextDiagnostics(lineRange);
+        const lineActions = await requestForRange(lineRange, lineDiagnostics);
+        actions = dedupeActions([...lineActions, ...actions]);
       }
     }
-    
-    const results = await Promise.all(l.clients.map(async c => {
-      if (c.closed) return [];
-      try {
-        const r = await c.connection.sendRequest(CodeActionRequest.type, {
-          textDocument: { uri: l.uri },
-          range,
-          context: { diagnostics, only: [CodeActionKind.QuickFix, CodeActionKind.Refactor, CodeActionKind.Source] },
-        });
-        return r || [];
-      } catch { return []; }
-    }));
-    return results.flat();
+
+    return dedupeActions(actions);
   }
 
   private rangesOverlap(a: { start: { line: number; character: number }; end: { line: number; character: number } }, 
@@ -1247,23 +1322,47 @@ export function filterDiagnosticsBySeverity(diags: Diagnostic[], filter: Severit
 
 // URI utilities
 export function uriToPath(uri: string): string {
-  if (uri.startsWith("file://")) try { return fileURLToPath(uri); } catch {}
+  if (uri.startsWith("file://")) {
+    try {
+      return fileURLToPath(uri);
+    } catch {
+      try {
+        const url = new URL(uri);
+        let pathname = decodeURIComponent(url.pathname);
+
+        // On Windows, some test inputs and some servers may still use POSIX-style
+        // file URIs such as file:///Users/test/file.ts. Preserve that pathname shape
+        // instead of falling back to the original URI string.
+        if (process.platform === "win32") {
+          if (/^\/[A-Za-z]:\//.test(pathname)) return pathname.slice(1).replace(/\//g, path.sep);
+          return pathname;
+        }
+
+        return pathname;
+      } catch {}
+    }
+  }
   return uri;
 }
 
 // Symbol search
-export function findSymbolPosition(symbols: DocumentSymbol[], query: string): { line: number; character: number } | null {
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function findBestSymbolMatch(symbols: DocumentSymbol[], query: string): { pos: { line: number; character: number }; name: string } | null {
   const q = query.toLowerCase();
-  let exact: { line: number; character: number } | null = null;
-  let partial: { line: number; character: number } | null = null;
+  let exact: { pos: { line: number; character: number }; name: string } | null = null;
+  let partial: { pos: { line: number; character: number }; name: string } | null = null;
 
   const visit = (items: DocumentSymbol[]) => {
     for (const sym of items) {
-      const name = String(sym?.name ?? "").toLowerCase();
+      const rawName = String(sym?.name ?? "");
+      const name = rawName.toLowerCase();
       const pos = sym?.selectionRange?.start ?? sym?.range?.start;
       if (pos && typeof pos.line === "number" && typeof pos.character === "number") {
-        if (!exact && name === q) exact = pos;
-        if (!partial && name.includes(q)) partial = pos;
+        if (!exact && name === q) exact = { pos, name: rawName };
+        if (!partial && name.includes(q)) partial = { pos, name: rawName };
       }
       if (sym?.children?.length) visit(sym.children);
     }
@@ -1272,10 +1371,38 @@ export function findSymbolPosition(symbols: DocumentSymbol[], query: string): { 
   return exact ?? partial;
 }
 
+export function findSymbolPosition(symbols: DocumentSymbol[], query: string): { line: number; character: number } | null {
+  return findBestSymbolMatch(symbols, query)?.pos ?? null;
+}
+
+function refineSymbolPositionFromSource(filePath: string, line: number, symbolName: string): { line: number; character: number } | null {
+  try {
+    const content = fs.readFileSync(filePath, "utf-8");
+    const lines = content.split(/\r?\n/);
+    const token = new RegExp(`\\b${escapeRegExp(symbolName)}\\b`);
+
+    const candidates = [line, line + 1, line + 2, line - 1].filter((n, i, arr) => n >= 0 && n < lines.length && arr.indexOf(n) === i);
+    for (const lineIndex of candidates) {
+      const match = lines[lineIndex]?.match(token);
+      if (match && typeof match.index === "number") {
+        return { line: lineIndex, character: match.index };
+      }
+    }
+  } catch {
+    // ignore refinement failures and fall back to symbol-provided position
+  }
+  return null;
+}
+
 export async function resolvePosition(manager: LSPManager, file: string, query: string): Promise<{ line: number; column: number } | null> {
   const symbols = await manager.getDocumentSymbols(file);
-  const pos = findSymbolPosition(symbols, query);
-  return pos ? { line: pos.line + 1, column: pos.character + 1 } : null;
+  const match = findBestSymbolMatch(symbols, query);
+  if (!match) return null;
+
+  const absPath = manager.resolveFilePath(file);
+  const refined = refineSymbolPositionFromSource(absPath, match.pos.line, match.name);
+  const pos = refined ?? match.pos;
+  return { line: pos.line + 1, column: pos.character + 1 };
 }
 
 /**

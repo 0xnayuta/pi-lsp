@@ -24,7 +24,10 @@ function assertEqual<T>(actual: T, expected: T, message?: string) {
 // Or we can extract and test the logic directly
 // ============================================================================
 
-import { uriToPath, findSymbolPosition, formatDiagnostic, filterDiagnosticsBySeverity, collectSymbols } from "../lsp-core.js";
+import { mkdtemp, rm, writeFile } from "fs/promises";
+import { tmpdir } from "os";
+import { join } from "path";
+import { uriToPath, findSymbolPosition, formatDiagnostic, filterDiagnosticsBySeverity, collectSymbols, resolvePosition } from "../lsp-core.js";
 
 // ============================================================================
 // uriToPath tests
@@ -274,6 +277,56 @@ test("collectSymbols: recurses into children with indentation", () => {
 test("collectSymbols: returns empty array for no symbols", () => {
   const lines = collectSymbols([] as any);
   assertEqual(lines.length, 0);
+});
+
+test("resolvePosition: refines C++ function position to identifier token", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "lsp-resolve-"));
+  try {
+    const file = join(dir, "mylib.cpp");
+    await writeFile(file, "std::string get_greeting(const std::string& name) {\n  return name;\n}\n");
+
+    const pos = await resolvePosition({
+      getDocumentSymbols: async () => ([
+        {
+          name: "get_greeting",
+          kind: 12,
+          range: { start: { line: 0, character: 0 }, end: { line: 2, character: 1 } },
+          selectionRange: { start: { line: 0, character: 0 }, end: { line: 0, character: 11 } },
+          children: [],
+        },
+      ]),
+      resolveFilePath: () => file,
+    } as any, file, "get_greeting");
+
+    assertEqual(pos, { line: 1, column: 13 });
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test("resolvePosition: partial query refines to matched symbol name", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "lsp-resolve-"));
+  try {
+    const file = join(dir, "mylib.cpp");
+    await writeFile(file, "std::string get_greeting(const std::string& name) {\n  return name;\n}\n");
+
+    const pos = await resolvePosition({
+      getDocumentSymbols: async () => ([
+        {
+          name: "get_greeting",
+          kind: 12,
+          range: { start: { line: 0, character: 0 }, end: { line: 2, character: 1 } },
+          selectionRange: { start: { line: 0, character: 0 }, end: { line: 0, character: 11 } },
+          children: [],
+        },
+      ]),
+      resolveFilePath: () => file,
+    } as any, file, "greet");
+
+    assertEqual(pos, { line: 1, column: 13 });
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
 });
 
 // ============================================================================

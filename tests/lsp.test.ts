@@ -499,17 +499,29 @@ test("pyright: finds root with requirements.txt", async () => {
 // ============================================================================
 
 test("pathToFileURL: handles simple paths", async () => {
-  const uri = pathToFileURL("/home/user/project/file.ts").href;
-  assertEquals(uri, "file:///home/user/project/file.ts", "Should create proper file URI");
+  const input = process.platform === "win32"
+    ? "E:/home/user/project/file.ts"
+    : "/home/user/project/file.ts";
+  const uri = pathToFileURL(input).href;
+  const expected = process.platform === "win32"
+    ? "file:///E:/home/user/project/file.ts"
+    : "file:///home/user/project/file.ts";
+  assertEquals(uri, expected, "Should create proper file URI");
 });
 
 test("pathToFileURL: encodes special characters", async () => {
-  const uri = pathToFileURL("/home/user/my project/file.ts").href;
+  const input = process.platform === "win32"
+    ? "E:/home/user/my project/file.ts"
+    : "/home/user/my project/file.ts";
+  const uri = pathToFileURL(input).href;
   assert(uri.includes("my%20project"), "Should URL-encode spaces");
 });
 
 test("pathToFileURL: handles unicode", async () => {
-  const uri = pathToFileURL("/home/user/项目/file.ts").href;
+  const input = process.platform === "win32"
+    ? "E:/home/user/项目/file.ts"
+    : "/home/user/项目/file.ts";
+  const uri = pathToFileURL(input).href;
   // pathToFileURL properly encodes unicode
   assert(uri.startsWith("file:///"), "Should start with file:///");
   assert(uri.includes("file.ts"), "Should contain filename");
