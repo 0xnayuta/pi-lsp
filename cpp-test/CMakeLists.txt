@@ -8,3 +8,4 @@ add_executable(main src/main.cpp)
 add_library(mylib src/mylib.cpp include/mylib.h)
 
 target_include_directories(mylib PUBLIC include)
+target_link_libraries(main PRIVATE mylib)
