@@ -1,7 +1,7 @@
 /**
  * Integration tests for LSP - spawns real language servers and detects errors
  *
- * Run with: npm run test:integration
+ * Run with: pnpm test:integration
  *
  * Skips tests if language server is not installed.
  */

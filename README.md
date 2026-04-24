@@ -71,16 +71,16 @@ Install the language servers you need (examples):
 
 ```bash
 # TypeScript/JavaScript
-npm i -g typescript-language-server typescript
+pnpm add -g typescript-language-server typescript
 
 # Vue
-npm i -g @vue/language-server
+pnpm add -g @vue/language-server
 
 # Svelte
-npm i -g svelte-language-server
+pnpm add -g svelte-language-server
 
 # Python
-npm i -g pyright
+pnpm add -g pyright
 
 # Go
 go install golang.org/x/tools/gopls@latest
@@ -246,13 +246,13 @@ Global config example:
 
 ```bash
 # Root/config/unit tests
-npm test
+pnpm test
 
 # Tool-focused tests
-npm run test:tool
+pnpm test:tool
 
 # Integration tests (real language servers)
-npm run test:integration
+pnpm test:integration
 ```
 
 ---

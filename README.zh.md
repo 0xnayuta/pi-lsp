@@ -71,16 +71,16 @@
 
 ```bash
 # TypeScript/JavaScript
-npm i -g typescript-language-server typescript
+pnpm add -g typescript-language-server typescript
 
 # Vue
-npm i -g @vue/language-server
+pnpm add -g @vue/language-server
 
 # Svelte
-npm i -g svelte-language-server
+pnpm add -g svelte-language-server
 
 # Python
-npm i -g pyright
+pnpm add -g pyright
 
 # Go
 go install golang.org/x/tools/gopls@latest
@@ -246,13 +246,13 @@ lsp action=definition file=lsp-core.ts query=getOrCreateManager
 
 ```bash
 # 根目录/配置/单元测试
-npm test
+pnpm test
 
 # 工具相关测试
-npm run test:tool
+pnpm test:tool
 
 # 集成测试（真实语言服务器）
-npm run test:integration
+pnpm test:integration
 ```
 
 ---

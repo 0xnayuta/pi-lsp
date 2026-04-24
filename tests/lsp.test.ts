@@ -1,7 +1,7 @@
 /**
  * Tests for LSP hook - configuration and utility functions
  *
- * Run with: npm test
+ * Run with: pnpm test
  *
  * These tests cover:
  * - Project root detection for various languages
