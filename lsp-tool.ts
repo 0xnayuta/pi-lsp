@@ -29,7 +29,7 @@ import { Type, type Static } from "@sinclair/typebox";
 import { StringEnum } from "@mariozechner/pi-ai";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
-import { getOrCreateManager, shutdownManager, LSP_SERVERS, formatDiagnostic, filterDiagnosticsBySeverity, uriToPath, resolvePosition, collectSymbols, diagnosticsWaitMsForFile, type SeverityFilter } from "./lsp-core.js";
+import { getOrCreateManager, shutdownManager, LSP_SERVERS, formatDiagnostic, filterDiagnosticsBySeverity, uriToPath, resolvePosition, collectSymbols, diagnosticsWaitMsForFile, getCppCompilationDbHint, type SeverityFilter } from "./lsp-core.js";
 
 const PREVIEW_LINES = 10;
 
@@ -293,12 +293,14 @@ Use bash to find files: find src -name "*.ts" -type f`,
           case "diagnostics": {
             const result = await abortable(manager.touchFileAndWait(file!, diagnosticsWaitMsForFile(file!)), signal);
             const filtered = filterDiagnosticsBySeverity(result.diagnostics, sevFilter);
+            const hint = getCppCompilationDbHint(file!, ctx.cwd);
             const payload = (result as any).unsupported
               ? `Unsupported: ${(result as any).error || "No LSP for this file."}`
               : !result.receivedResponse
                 ? "Timeout: LSP server did not respond. Try again."
                 : filtered.length ? filtered.map(formatDiagnostic).join("\n") : "No diagnostics.";
-            return { content: [{ type: "text", text: `action: diagnostics\n${sevLine}${payload}` }], details: { ...result, diagnostics: filtered } };
+            const hintLine = hint ? `\n\n${hint}` : "";
+            return { content: [{ type: "text", text: `action: diagnostics\n${sevLine}${payload}${hintLine}` }], details: { ...result, diagnostics: filtered } };
           }
           case "workspace-diagnostics": {
             if (!files?.length) throw new Error('Action "workspace-diagnostics" requires a "files" array.');
@@ -307,6 +309,7 @@ Use bash to find files: find src -name "*.ts" -type f`,
             const out: string[] = [];
             let errors = 0, warnings = 0, filesWithIssues = 0;
 
+            const hints: string[] = [];
             for (const item of result.items) {
               const display = ctx?.cwd && path.isAbsolute(item.file) ? path.relative(ctx.cwd, item.file) : item.file;
               if (item.status !== 'ok') { out.push(`${display}: ${item.error || item.status}`); continue; }
@@ -319,10 +322,13 @@ Use bash to find files: find src -name "*.ts" -type f`,
                   out.push(`  ${formatDiagnostic(d)}`);
                 }
               }
+              const hint = getCppCompilationDbHint(item.file, ctx.cwd);
+              if (hint && !hints.includes(hint)) hints.push(hint);
             }
 
             const summary = `Analyzed ${result.items.length} file(s): ${errors} error(s), ${warnings} warning(s) in ${filesWithIssues} file(s)`;
-            return { content: [{ type: "text", text: `action: workspace-diagnostics\n${sevLine}${summary}\n\n${out.length ? out.join("\n") : "No diagnostics."}` }], details: result };
+            const hintBlock = hints.length ? `\n\n${hints.join("\n\n")}` : "";
+            return { content: [{ type: "text", text: `action: workspace-diagnostics\n${sevLine}${summary}\n\n${out.length ? out.join("\n") : "No diagnostics."}${hintBlock}` }], details: result };
           }
           case "signature": {
             const result = await abortable(manager.getSignatureHelp(file!, rLine!, rCol!), signal);

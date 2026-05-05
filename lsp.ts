@@ -18,7 +18,7 @@ import * as os from "node:os";
 import { type ExtensionAPI, type ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { type Diagnostic } from "vscode-languageserver-protocol";
-import { LSP_SERVERS, formatDiagnostic, getOrCreateManager, shutdownManager, diagnosticsWaitMsForFile } from "./lsp-core.js";
+import { LSP_SERVERS, formatDiagnostic, getOrCreateManager, shutdownManager, diagnosticsWaitMsForFile, getCppCompilationDbHint } from "./lsp-core.js";
 
 type HookScope = "session" | "global";
 type HookMode = "edit_write" | "agent_end" | "disabled";
@@ -340,16 +340,22 @@ export default function (pi: ExtensionAPI) {
       const diagnostics = includeWarnings
         ? result.diagnostics
         : result.diagnostics.filter((d) => d.severity === 1);
-      if (!diagnostics.length) return undefined;
+      const hint = getCppCompilationDbHint(absPath, ctx.cwd);
+      if (!diagnostics.length && !hint) return undefined;
 
-      const report = buildDiagnosticsOutput(filePath, diagnostics, ctx.cwd, includeFileHeader);
-
-      if (notify) {
-        if (ctx.hasUI) ctx.ui.notify(report.notification, report.errorCount > 0 ? "error" : "warning");
-        else console.error(report.notification);
+      let output: string;
+      if (diagnostics.length) {
+        const report = buildDiagnosticsOutput(filePath, diagnostics, ctx.cwd, includeFileHeader);
+        output = hint ? `${report.output}\n${hint}\n` : report.output;
+        if (notify) {
+          if (ctx.hasUI) ctx.ui.notify(report.notification, report.errorCount > 0 ? "error" : "warning");
+          else console.error(report.notification);
+        }
+      } else {
+        output = `\n${hint}\n`;
       }
 
-      return report.output;
+      return output;
     } catch {
       return undefined;
     }

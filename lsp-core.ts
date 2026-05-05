@@ -213,6 +213,45 @@ function findCompileCommandsDir(root: string): string | undefined {
   return found[0].dir;
 }
 
+const CPP_EXTENSIONS = [".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".hxx", ".inc"];
+
+const CPP_ROOT_MARKERS = [
+  "compile_commands.json", "CMakeLists.txt", "Makefile",
+  "configure.ac", "configure.in", "meson.build",
+  "BUILD.bazel", "BUILD", ".clang-format", ".git",
+];
+
+export function getCppCompilationDbHint(absPath: string, cwd: string): string | null {
+  const ext = path.extname(absPath).toLowerCase();
+  if (!CPP_EXTENSIONS.includes(ext)) return null;
+
+  const root = findRoot(absPath, cwd, CPP_ROOT_MARKERS);
+  if (!root) return null;
+  if (findCompileCommandsDir(root)) return null;
+
+  const suggestions: string[] = [];
+  if (fs.existsSync(path.join(root, "CMakeLists.txt"))) {
+    suggestions.push("  cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=1 -B build");
+  }
+  if (fs.existsSync(path.join(root, "Makefile"))) {
+    suggestions.push("  bear -- make");
+  }
+  if (fs.existsSync(path.join(root, "meson.build"))) {
+    suggestions.push("  meson setup build --backend=ninja");
+  }
+  if (suggestions.length === 0) {
+    suggestions.push("  cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=1 -B build");
+    suggestions.push("  bear -- make");
+  }
+
+  return [
+    "⚠ No compile_commands.json found. clangd will use its built-in compiler with limited accuracy.",
+    "To generate one:",
+    ...suggestions,
+    "Or create a .clangd config file with CompilationDatabase set.",
+  ].join("\n");
+}
+
 function timeout<T>(promise: Promise<T>, ms: number, name: string): Promise<T> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`${name} timed out`)), ms);
