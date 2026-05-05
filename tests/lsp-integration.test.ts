@@ -200,6 +200,9 @@ test("rust: detects type errors", async () => {
   if (!commandExists("rust-analyzer")) {
     skip("rust-analyzer not installed");
   }
+  if (!commandExists("cargo")) {
+    skip("cargo not installed");
+  }
 
   const dir = await mkdtemp(join(tmpdir(), "lsp-rust-"));
   const manager = new LSPManager(dir);
@@ -224,6 +227,9 @@ test("rust: detects type errors", async () => {
 test("rust: valid code has no errors", async () => {
   if (!commandExists("rust-analyzer")) {
     skip("rust-analyzer not installed");
+  }
+  if (!commandExists("cargo")) {
+    skip("cargo not installed");
   }
 
   const dir = await mkdtemp(join(tmpdir(), "lsp-rust-"));
@@ -426,6 +432,72 @@ result = greet(x)
 `);
 
     const { diagnostics } = await manager.touchFileAndWait(file, 10000);
+    const errors = diagnostics.filter(d => d.severity === 1);
+
+    assert(errors.length === 0, `Expected no errors, got: ${errors.map(d => d.message).join(", ")}`);
+  } finally {
+    await manager.shutdown();
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+// ============================================================================
+// C++ (clangd)
+// ============================================================================
+
+test("cpp: detects type errors", async () => {
+  if (!commandExists("clangd")) {
+    skip("clangd not installed");
+  }
+
+  const dir = await mkdtemp(join(tmpdir(), "lsp-cpp-"));
+  const manager = new LSPManager(dir);
+
+  try {
+    await writeFile(join(dir, "CMakeLists.txt"),
+      "cmake_minimum_required(VERSION 3.10)\nproject(test)\nset(CMAKE_CXX_STANDARD 17)\nadd_executable(main main.cpp)");
+
+    const file = join(dir, "main.cpp");
+    // Type error: cannot assign int to std::string
+    await writeFile(file, `#include <string>
+
+int main() {
+    std::string x = 123;
+    return 0;
+}
+`);
+
+    const { diagnostics } = await manager.touchFileAndWait(file, 20000);
+
+    assert(diagnostics.length > 0, `Expected errors, got ${diagnostics.length}`);
+  } finally {
+    await manager.shutdown();
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test("cpp: valid code has no errors", async () => {
+  if (!commandExists("clangd")) {
+    skip("clangd not installed");
+  }
+
+  const dir = await mkdtemp(join(tmpdir(), "lsp-cpp-"));
+  const manager = new LSPManager(dir);
+
+  try {
+    await writeFile(join(dir, "CMakeLists.txt"),
+      "cmake_minimum_required(VERSION 3.10)\nproject(test)\nset(CMAKE_CXX_STANDARD 17)\nadd_executable(main main.cpp)");
+
+    const file = join(dir, "main.cpp");
+    await writeFile(file, `#include <string>
+
+int main() {
+    std::string x = "hello";
+    return 0;
+}
+`);
+
+    const { diagnostics } = await manager.touchFileAndWait(file, 20000);
     const errors = diagnostics.filter(d => d.severity === 1);
 
     assert(errors.length === 0, `Expected no errors, got: ${errors.map(d => d.message).join(", ")}`);
