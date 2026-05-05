@@ -39,7 +39,6 @@ import {
   type WorkspaceEdit,
   type CodeAction,
   type Command,
-  DiagnosticSeverity,
   CodeActionKind,
   DocumentDiagnosticReportKind,
 } from "vscode-languageserver-protocol";
@@ -49,6 +48,16 @@ const INIT_TIMEOUT_MS = 30000;
 const MAX_OPEN_FILES = 30;
 const IDLE_TIMEOUT_MS = 60_000;
 const CLEANUP_INTERVAL_MS = 30_000;
+const DIAGNOSTICS_WAIT_MS_DEFAULT = 3000;
+
+export function diagnosticsWaitMsForFile(filePath: string): number {
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === ".kt" || ext === ".kts") return 30000;
+  if (ext === ".swift") return 20000;
+  if (ext === ".rs") return 20000;
+  if ([".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".hxx", ".inc"].includes(ext)) return 20000;
+  return DIAGNOSTICS_WAIT_MS_DEFAULT;
+}
 
 export const LANGUAGE_IDS: Record<string, string> = {
   ".dart": "dart", ".ts": "typescript", ".tsx": "typescriptreact",
@@ -84,14 +93,14 @@ interface LSPClient {
   closed: boolean;
 }
 
-export interface FileDiagnosticItem {
+interface FileDiagnosticItem {
   file: string;
   diagnostics: Diagnostic[];
   status: 'ok' | 'timeout' | 'error' | 'unsupported';
   error?: string;
 }
 
-export interface FileDiagnosticsResult { items: FileDiagnosticItem[]; }
+interface FileDiagnosticsResult { items: FileDiagnosticItem[]; }
 
 // Utilities
 const SEARCH_PATHS = [
@@ -526,8 +535,6 @@ export function getOrCreateManager(cwd: string): LSPManager {
   }
   return sharedManager;
 }
-
-export function getManager(): LSPManager | null { return sharedManager; }
 
 export async function shutdownManager(): Promise<void> {
   const manager = sharedManager;
@@ -1306,7 +1313,6 @@ export class LSPManager {
 }
 
 // Diagnostic Formatting
-export { DiagnosticSeverity };
 export type SeverityFilter = "all" | "error" | "warning" | "info" | "hint";
 
 export function formatDiagnostic(d: Diagnostic): string {

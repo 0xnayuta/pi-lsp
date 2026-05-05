@@ -29,20 +29,9 @@ import { Type, type Static } from "@sinclair/typebox";
 import { StringEnum } from "@mariozechner/pi-ai";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
-import { getOrCreateManager, shutdownManager, LSP_SERVERS, formatDiagnostic, filterDiagnosticsBySeverity, uriToPath, resolvePosition, collectSymbols, type SeverityFilter } from "./lsp-core.js";
+import { getOrCreateManager, shutdownManager, LSP_SERVERS, formatDiagnostic, filterDiagnosticsBySeverity, uriToPath, resolvePosition, collectSymbols, diagnosticsWaitMsForFile, type SeverityFilter } from "./lsp-core.js";
 
 const PREVIEW_LINES = 10;
-
-const DIAGNOSTICS_WAIT_MS_DEFAULT = 3000;
-
-function diagnosticsWaitMsForFile(filePath: string): number {
-  const ext = path.extname(filePath).toLowerCase();
-  if (ext === ".kt" || ext === ".kts") return 30000;
-  if (ext === ".swift") return 20000;
-  if (ext === ".rs") return 20000;
-  if ([".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".hxx", ".inc"].includes(ext)) return 20000;
-  return DIAGNOSTICS_WAIT_MS_DEFAULT;
-}
 
 const ACTIONS = ["definition", "references", "hover", "symbols", "diagnostics", "workspace-diagnostics", "signature", "rename", "codeAction", "restart", "servers"] as const;
 const SEVERITY_FILTERS = ["all", "error", "warning", "info", "hint"] as const;

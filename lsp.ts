@@ -18,21 +18,11 @@ import * as os from "node:os";
 import { type ExtensionAPI, type ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { type Diagnostic } from "vscode-languageserver-protocol";
-import { LSP_SERVERS, formatDiagnostic, getOrCreateManager, shutdownManager } from "./lsp-core.js";
+import { LSP_SERVERS, formatDiagnostic, getOrCreateManager, shutdownManager, diagnosticsWaitMsForFile } from "./lsp-core.js";
 
 type HookScope = "session" | "global";
 type HookMode = "edit_write" | "agent_end" | "disabled";
 
-const DIAGNOSTICS_WAIT_MS_DEFAULT = 3000;
-
-function diagnosticsWaitMsForFile(filePath: string): number {
-  const ext = path.extname(filePath).toLowerCase();
-  if (ext === ".kt" || ext === ".kts") return 30000;
-  if (ext === ".swift") return 20000;
-  if (ext === ".rs") return 20000;
-  if ([".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".hxx", ".inc"].includes(ext)) return 20000;
-  return DIAGNOSTICS_WAIT_MS_DEFAULT;
-}
 const DIAGNOSTICS_PREVIEW_LINES = 10;
 const LSP_IDLE_SHUTDOWN_MS = 2 * 60 * 1000;
 const DIM = "\x1b[2m", GREEN = "\x1b[32m", YELLOW = "\x1b[33m", RESET = "\x1b[0m";
