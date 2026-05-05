@@ -45,6 +45,8 @@
   - 空闲服务自动关闭、按需重启
 - **稳健诊断策略**
   - 同时支持推送诊断（`publishDiagnostics`）与拉取诊断（`textDocument/diagnostic`、`workspace/diagnostic`）
+- **C/C++ 编译数据库引导**
+  - 当 `compile_commands.json` 缺失时，诊断输出会附带针对当前构建系统（CMake、Makefile + bear、Meson）的生成命令提示
 
 ---
 
@@ -91,7 +93,7 @@ go install golang.org/x/tools/gopls@latest
 # Swift（macOS）
 xcrun sourcekit-lsp --help
 
-# Rust
+# Rust（需要同时安装 rust-analyzer 和 cargo）
 rustup component add rust-analyzer
 
 # C/C++
@@ -221,6 +223,7 @@ lsp action=definition file=lsp-core.ts query=getOrCreateManager
 - 引入内存边界控制（最大打开文件数、LRU 淘汰、空闲关闭）。
 - 改进跨平台文件 URI 到路径映射（优先 `fileURLToPath`）。
 - clangd 启动参数增加 `--compile-commands-dir=<root>`，更稳定识别编译数据库。
+- 新增 `compile_commands.json` 提示：当 C/C++ 文件缺少编译数据库时，诊断输出会附带针对当前构建系统的生成命令（CMake、Makefile + bear、Meson）。
 
 ### `lsp-tool.ts`（工具）
 
@@ -245,22 +248,25 @@ lsp action=definition file=lsp-core.ts query=getOrCreateManager
 ## 测试
 
 ```bash
-# 根目录/配置/单元测试
+# 根目录/配置/单元测试（78 个测试）
 pnpm test
 
-# 工具相关测试
+# 工具相关测试（27 个测试）
 pnpm test:tool
 
-# 集成测试（真实语言服务器）
+# 集成测试（真实语言服务器，20+ 个测试）
 pnpm test:integration
+
+# 运行全部
+pnpm test:all
 ```
 
 ---
 
 ## 已知限制
 
-- **rust-analyzer** 在复杂项目中的首次初始化可能较慢。
-- **clangd** 在有 `compile_commands.json` 时效果最佳。
+- **rust-analyzer** 需要同时安装 `rust-analyzer` 和 `cargo`。在复杂项目中的首次初始化可能较慢。
+- **clangd** 在有 `compile_commands.json` 时效果最佳。当缺少该文件时，扩展会输出针对当前构建系统的生成命令提示。
 - 大型仓库首次索引可能耗时较明显。
 
 ---

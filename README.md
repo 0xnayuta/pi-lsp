@@ -45,6 +45,8 @@ Language Server Protocol integration for **pi-coding-agent**.
   - idle server shutdown and lazy restart
 - **Robust diagnostics retrieval**
   - supports both push diagnostics (`publishDiagnostics`) and pull diagnostics (`textDocument/diagnostic`, `workspace/diagnostic`)
+- **C/C++ compile_commands.json guidance**
+  - when `compile_commands.json` is missing, diagnostics output includes build-system-specific hints for generating one (CMake, Makefile + bear, Meson)
 
 ---
 
@@ -91,7 +93,7 @@ go install golang.org/x/tools/gopls@latest
 # Swift (macOS)
 xcrun sourcekit-lsp --help
 
-# Rust
+# Rust (both rust-analyzer and cargo are required)
 rustup component add rust-analyzer
 
 # C/C++
@@ -221,6 +223,7 @@ Global config example:
 - Added bounded memory strategy (max open files, LRU eviction, idle close).
 - Improved cross-platform file URI mapping (`fileURLToPath` first).
 - Improved clangd startup with `--compile-commands-dir=<root>`.
+- Added `compile_commands.json` hint: when missing for C/C++ files, diagnostics output includes build-system-specific generation commands (CMake, Makefile + bear, Meson).
 
 ### `lsp-tool.ts` (Tool)
 
@@ -245,22 +248,25 @@ Global config example:
 ## Testing
 
 ```bash
-# Root/config/unit tests
+# Root/config/unit tests (78 tests)
 pnpm test
 
-# Tool-focused tests
+# Tool-focused tests (27 tests)
 pnpm test:tool
 
-# Integration tests (real language servers)
+# Integration tests (real language servers, 20+ tests)
 pnpm test:integration
+
+# Run all
+pnpm test:all
 ```
 
 ---
 
 ## Known Limitations
 
-- **rust-analyzer** can be slow to initialize for non-trivial projects.
-- **clangd** works best with `compile_commands.json`.
+- **rust-analyzer** requires both `rust-analyzer` and `cargo` to be installed. Can be slow to initialize for non-trivial projects.
+- **clangd** works best with `compile_commands.json`. When it is missing, the extension provides build-system-specific hints for generating one.
 - For very large repositories, first-run indexing may take noticeable time.
 
 ---
