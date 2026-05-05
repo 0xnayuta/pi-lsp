@@ -508,6 +508,374 @@ int main() {
 });
 
 // ============================================================================
+// Definition (TypeScript)
+// ============================================================================
+
+test("typescript: go to definition", async () => {
+  if (!commandExists("typescript-language-server")) {
+    skip("typescript-language-server not installed");
+  }
+
+  const dir = await mkdtemp(join(tmpdir(), "lsp-ts-def-"));
+  const manager = new LSPManager(dir);
+
+  try {
+    await writeFile(join(dir, "package.json"), "{}");
+    await writeFile(join(dir, "tsconfig.json"), JSON.stringify({
+      compilerOptions: { strict: true, noEmit: true }
+    }));
+
+    const file = join(dir, "index.ts");
+    await writeFile(file, `function greet(name: string) {
+  return "Hello, " + name;
+}
+const result = greet("world");
+`);
+
+    await manager.touchFileAndWait(file, 10000);
+
+    // Go to definition of 'greet' at the call site (line 4, col 16)
+    const defs = await manager.getDefinition(file, 4, 16);
+
+    assert(defs.length > 0, `Expected at least 1 definition, got ${defs.length}`);
+    const def = defs[0];
+    // Definition should point to line 1 (the function declaration)
+    assert(def.range.start.line === 0, `Expected definition at line 1, got line ${def.range.start.line + 1}`);
+  } finally {
+    await manager.shutdown();
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test("typescript: go to definition across files", async () => {
+  if (!commandExists("typescript-language-server")) {
+    skip("typescript-language-server not installed");
+  }
+
+  const dir = await mkdtemp(join(tmpdir(), "lsp-ts-def2-"));
+  const manager = new LSPManager(dir);
+
+  try {
+    await writeFile(join(dir, "package.json"), "{}");
+    await writeFile(join(dir, "tsconfig.json"), JSON.stringify({
+      compilerOptions: { strict: true, noEmit: true }
+    }));
+
+    const util = join(dir, "util.ts");
+    await writeFile(util, `export function add(a: number, b: number): number {
+  return a + b;
+}
+`);
+
+    const main = join(dir, "main.ts");
+    await writeFile(main, `import { add } from "./util";
+const sum = add(1, 2);
+`);
+
+    await manager.touchFileAndWait(main, 10000);
+
+    // Go to definition of 'add' in main.ts (line 2, col 13)
+    const defs = await manager.getDefinition(main, 2, 13);
+
+    assert(defs.length > 0, `Expected at least 1 definition, got ${defs.length}`);
+    const def = defs[0];
+    // Definition should be in util.ts
+    assert(def.range.start.line === 0, `Expected definition at line 1 of util.ts, got line ${def.range.start.line + 1}`);
+  } finally {
+    await manager.shutdown();
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+// ============================================================================
+// References (TypeScript)
+// ============================================================================
+
+test("typescript: find references", async () => {
+  if (!commandExists("typescript-language-server")) {
+    skip("typescript-language-server not installed");
+  }
+
+  const dir = await mkdtemp(join(tmpdir(), "lsp-ts-refs-"));
+  const manager = new LSPManager(dir);
+
+  try {
+    await writeFile(join(dir, "package.json"), "{}");
+    await writeFile(join(dir, "tsconfig.json"), JSON.stringify({
+      compilerOptions: { strict: true, noEmit: true }
+    }));
+
+    const file = join(dir, "index.ts");
+    await writeFile(file, `function greet(name: string) {
+  return "Hello, " + name;
+}
+const a = greet("Alice");
+const b = greet("Bob");
+`);
+
+    await manager.touchFileAndWait(file, 10000);
+
+    // Find references of 'greet' at its definition (line 1, col 10)
+    const refs = await manager.getReferences(file, 1, 10);
+
+    // Should find: definition (line 1) + call on line 4 + call on line 5 = 3 references
+    assert(refs.length >= 3, `Expected at least 3 references, got ${refs.length}`);
+  } finally {
+    await manager.shutdown();
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test("typescript: find references across files", async () => {
+  if (!commandExists("typescript-language-server")) {
+    skip("typescript-language-server not installed");
+  }
+
+  const dir = await mkdtemp(join(tmpdir(), "lsp-ts-refs2-"));
+  const manager = new LSPManager(dir);
+
+  try {
+    await writeFile(join(dir, "package.json"), "{}");
+    await writeFile(join(dir, "tsconfig.json"), JSON.stringify({
+      compilerOptions: { strict: true, noEmit: true }
+    }));
+
+    const util = join(dir, "util.ts");
+    await writeFile(util, `export function double(x: number): number {
+  return x * 2;
+}
+`);
+
+    const main = join(dir, "main.ts");
+    await writeFile(main, `import { double } from "./util";
+const a = double(5);
+const b = double(10);
+`);
+
+    await manager.touchFileAndWait(main, 10000);
+
+    // Find references of 'double' at the import (line 1, col 10)
+    const refs = await manager.getReferences(main, 1, 10);
+
+    // Should find: import (line 1) + call (line 2) + call (line 3) + definition in util.ts = 4 references
+    assert(refs.length >= 3, `Expected at least 3 references, got ${refs.length}`);
+  } finally {
+    await manager.shutdown();
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+// ============================================================================
+// Hover (TypeScript)
+// ============================================================================
+
+test("typescript: hover shows type information", async () => {
+  if (!commandExists("typescript-language-server")) {
+    skip("typescript-language-server not installed");
+  }
+
+  const dir = await mkdtemp(join(tmpdir(), "lsp-ts-hover-"));
+  const manager = new LSPManager(dir);
+
+  try {
+    await writeFile(join(dir, "package.json"), "{}");
+    await writeFile(join(dir, "tsconfig.json"), JSON.stringify({
+      compilerOptions: { strict: true, noEmit: true }
+    }));
+
+    const file = join(dir, "index.ts");
+    await writeFile(file, `function greet(name: string): string {
+  return "Hello, " + name;
+}
+const x = 42;
+const result = greet("world");
+`);
+
+    await manager.touchFileAndWait(file, 10000);
+
+    // Hover over 'greet' at the call site (line 5, col 16)
+    const hover = await manager.getHover(file, 5, 16);
+
+    assert(hover !== null, "Expected hover to return a result");
+    // Hover should contain function signature info
+    const content = typeof hover!.contents === "string"
+      ? hover!.contents
+      : Array.isArray(hover!.contents)
+        ? hover!.contents.map((c: any) => typeof c === "string" ? c : c.value ?? "").join("")
+        : (hover!.contents as any)?.value ?? "";
+    assert(content.length > 0, "Expected hover content to be non-empty");
+  } finally {
+    await manager.shutdown();
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test("typescript: hover on variable shows type", async () => {
+  if (!commandExists("typescript-language-server")) {
+    skip("typescript-language-server not installed");
+  }
+
+  const dir = await mkdtemp(join(tmpdir(), "lsp-ts-hover2-"));
+  const manager = new LSPManager(dir);
+
+  try {
+    await writeFile(join(dir, "package.json"), "{}");
+    await writeFile(join(dir, "tsconfig.json"), JSON.stringify({
+      compilerOptions: { strict: true, noEmit: true }
+    }));
+
+    const file = join(dir, "index.ts");
+    await writeFile(file, `const message: string = "hello";
+const count: number = 42;
+`);
+
+    await manager.touchFileAndWait(file, 10000);
+
+    // Hover over 'message' (line 1, col 7)
+    const hover = await manager.getHover(file, 1, 7);
+
+    assert(hover !== null, "Expected hover to return a result");
+    const content = typeof hover!.contents === "string"
+      ? hover!.contents
+      : Array.isArray(hover!.contents)
+        ? hover!.contents.map((c: any) => typeof c === "string" ? c : c.value ?? "").join("")
+        : (hover!.contents as any)?.value ?? "";
+    assert(content.includes("string"), `Expected hover to mention 'string' type, got: ${content}`);
+  } finally {
+    await manager.shutdown();
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+// ============================================================================
+// Symbols (TypeScript)
+// ============================================================================
+
+test("typescript: list document symbols", async () => {
+  if (!commandExists("typescript-language-server")) {
+    skip("typescript-language-server not installed");
+  }
+
+  const dir = await mkdtemp(join(tmpdir(), "lsp-ts-symbols-"));
+  const manager = new LSPManager(dir);
+
+  try {
+    await writeFile(join(dir, "package.json"), "{}");
+    await writeFile(join(dir, "tsconfig.json"), JSON.stringify({
+      compilerOptions: { strict: true, noEmit: true }
+    }));
+
+    const file = join(dir, "index.ts");
+    await writeFile(file, `function greet(name: string) {
+  return "Hello, " + name;
+}
+function add(a: number, b: number) {
+  return a + b;
+}
+const x = 42;
+`);
+
+    await manager.touchFileAndWait(file, 10000);
+
+    const symbols = await manager.getDocumentSymbols(file);
+
+    assert(symbols.length >= 3, `Expected at least 3 symbols (greet, add, x), got ${symbols.length}`);
+
+    const names = symbols.map(s => s.name);
+    assert(names.includes("greet"), `Expected symbol 'greet', got: ${names.join(", ")}`);
+    assert(names.includes("add"), `Expected symbol 'add', got: ${names.join(", ")}`);
+  } finally {
+    await manager.shutdown();
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test("typescript: list symbols with class", async () => {
+  if (!commandExists("typescript-language-server")) {
+    skip("typescript-language-server not installed");
+  }
+
+  const dir = await mkdtemp(join(tmpdir(), "lsp-ts-symbols2-"));
+  const manager = new LSPManager(dir);
+
+  try {
+    await writeFile(join(dir, "package.json"), "{}");
+    await writeFile(join(dir, "tsconfig.json"), JSON.stringify({
+      compilerOptions: { strict: true, noEmit: true }
+    }));
+
+    const file = join(dir, "index.ts");
+    await writeFile(file, `class Calculator {
+  add(a: number, b: number) {
+    return a + b;
+  }
+  subtract(a: number, b: number) {
+    return a - b;
+  }
+}
+`);
+
+    await manager.touchFileAndWait(file, 10000);
+
+    const symbols = await manager.getDocumentSymbols(file);
+
+    assert(symbols.length >= 1, `Expected at least 1 symbol (Calculator), got ${symbols.length}`);
+
+    const calc = symbols.find(s => s.name === "Calculator");
+    assert(calc !== undefined, `Expected symbol 'Calculator', got: ${symbols.map(s => s.name).join(", ")}`);
+    // Class should have children (methods) - check both DocumentSymbol tree and flat SymbolInformation list
+    const methodNames = calc!.children?.length
+      ? calc!.children.map(c => c.name)
+      : symbols.filter(s => s.name === "add" || s.name === "subtract").map(s => s.name);
+    assert(methodNames.length >= 2, `Expected Calculator to have methods (add, subtract), got: ${methodNames.join(", ")}`);
+  } finally {
+    await manager.shutdown();
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+// ============================================================================
+// Signature (TypeScript)
+// ============================================================================
+
+test("typescript: signature help", async () => {
+  if (!commandExists("typescript-language-server")) {
+    skip("typescript-language-server not installed");
+  }
+
+  const dir = await mkdtemp(join(tmpdir(), "lsp-ts-sig-"));
+  const manager = new LSPManager(dir);
+
+  try {
+    await writeFile(join(dir, "package.json"), "{}");
+    await writeFile(join(dir, "tsconfig.json"), JSON.stringify({
+      compilerOptions: { strict: true, noEmit: true }
+    }));
+
+    const file = join(dir, "index.ts");
+    await writeFile(file, `function add(a: number, b: number): number {
+  return a + b;
+}
+const result = add(1, );
+`);
+
+    await manager.touchFileAndWait(file, 10000);
+
+    // Get signature help inside the function call (line 4, col 20)
+    const sig = await manager.getSignatureHelp(file, 4, 20);
+
+    assert(sig !== null, "Expected signature help to return a result");
+    assert(sig!.signatures.length > 0, "Expected at least 1 signature");
+    const label = sig!.signatures[0].label;
+    assert(label.includes("add"), `Expected signature to mention 'add', got: ${label}`);
+    assert(label.includes("number"), `Expected signature to mention parameter types, got: ${label}`);
+  } finally {
+    await manager.shutdown();
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+// ============================================================================
 // Rename (TypeScript)
 // ============================================================================
 
