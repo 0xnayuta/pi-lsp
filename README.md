@@ -1,6 +1,6 @@
 # LSP Extension for pi-coding-agent
 
-[English](./README.md) | [中文](./README.zh.md)
+English | [中文](./README.zh.md)
 
 Language Server Protocol integration for **pi-coding-agent**.
 
@@ -12,19 +12,24 @@ Language Server Protocol integration for **pi-coding-agent**.
 
 ## Table of Contents
 
-- [Features](#features)
-- [Supported Languages](#supported-languages)
-- [Requirements](#requirements)
-- [Installation](#installation)
-- [Usage](#usage)
-  - [Hook (Auto Diagnostics)](#hook-auto-diagnostics)
-  - [Tool (`lsp`)](#tool-lsp)
-- [Settings](#settings)
-- [Recent Core Improvements](#recent-core-improvements)
-- [Project Structure](#project-structure)
-- [Testing](#testing)
-- [Known Limitations](#known-limitations)
-- [License](#license)
+- [LSP Extension for pi-coding-agent](#lsp-extension-for-pi-coding-agent)
+  - [Table of Contents](#table-of-contents)
+  - [Features](#features)
+  - [Supported Languages](#supported-languages)
+  - [Requirements](#requirements)
+  - [Installation](#installation)
+  - [Usage](#usage)
+    - [Hook (Auto Diagnostics)](#hook-auto-diagnostics)
+    - [Tool (`lsp`)](#tool-lsp)
+  - [Settings](#settings)
+  - [Recent Core Improvements](#recent-core-improvements)
+    - [`lsp.ts` (Hook)](#lspts-hook)
+    - [`lsp-core.ts` (Manager)](#lsp-corets-manager)
+    - [`lsp-tool.ts` (Tool)](#lsp-toolts-tool)
+  - [Project Structure](#project-structure)
+  - [Testing](#testing)
+  - [Known Limitations](#known-limitations)
+  - [License](#license)
 
 ---
 
