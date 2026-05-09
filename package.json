@@ -1,12 +1,12 @@
 {
   "name": "lsp-pi",
   "version": "1.0.1",
-  "packageManager": "pnpm@10.33.0",
+  "packageManager": "pnpm@11.0.9",
   "description": "LSP extension for pi-coding-agent - provides language server tool and diagnostics feedback for Dart/Flutter, TypeScript, Vue, Svelte, Python, Go, Kotlin, Swift, Rust, C/C++",
   "scripts": {
-    "test": "tsx tests/lsp.test.ts",
-    "test:tool": "tsx tests/index.test.ts",
-    "test:integration": "tsx tests/lsp-integration.test.ts",
+    "test": "node --experimental-strip-types tests/lsp.test.ts",
+    "test:tool": "node --experimental-strip-types tests/index.test.ts",
+    "test:integration": "node --experimental-strip-types tests/lsp-integration.test.ts",
     "test:all": "pnpm test && pnpm test:tool && pnpm test:integration"
   },
   "keywords": [
@@ -49,20 +49,21 @@
     ]
   },
   "dependencies": {
-    "@sinclair/typebox": "^0.34.33",
+    "typebox": "^1.1.38",
     "vscode-languageserver-protocol": "^3.17.5"
   },
   "peerDependencies": {
-    "@mariozechner/pi-ai": "^0.50.0",
-    "@mariozechner/pi-coding-agent": "^0.50.0",
-    "@mariozechner/pi-tui": "^0.50.0"
+    "@earendil-works/pi-agent-core": "^0.74.0",
+    "@earendil-works/pi-ai": "^0.74.0",
+    "@earendil-works/pi-coding-agent": "^0.74.0",
+    "@earendil-works/pi-tui": "^0.74.0"
   },
   "devDependencies": {
-    "@mariozechner/pi-ai": "^0.50.0",
-    "@mariozechner/pi-coding-agent": "^0.50.0",
-    "@mariozechner/pi-tui": "^0.50.0",
-    "@types/node": "^24.10.2",
-    "tsx": "^4.21.0",
-    "typescript": "^5.9.3"
+    "@biomejs/biome": "^2.4.14",
+    "@earendil-works/pi-agent-core": "^0.74.0",
+    "@earendil-works/pi-ai": "^0.74.0",
+    "@earendil-works/pi-coding-agent": "^0.74.0",
+    "@earendil-works/pi-tui": "^0.74.0",
+    "typescript": "^6.0.3"
   }
 }

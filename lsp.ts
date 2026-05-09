@@ -18,7 +18,7 @@ import * as os from "node:os";
 import { type ExtensionAPI, type ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { type Diagnostic } from "vscode-languageserver-protocol";
-import { LSP_SERVERS, formatDiagnostic, getOrCreateManager, shutdownManager, diagnosticsWaitMsForFile, getCppCompilationDbHint } from "./lsp-core.js";
+import { LSP_SERVERS, formatDiagnostic, getOrCreateManager, shutdownManager, diagnosticsWaitMsForFile, getCppCompilationDbHint } from "./lsp-core.ts";
 
 type HookScope = "session" | "global";
 type HookMode = "edit_write" | "agent_end" | "disabled";

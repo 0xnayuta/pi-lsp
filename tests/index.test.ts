@@ -27,7 +27,7 @@ function assertEqual<T>(actual: T, expected: T, message?: string) {
 import { mkdtemp, rm, writeFile } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
-import { uriToPath, findSymbolPosition, formatDiagnostic, filterDiagnosticsBySeverity, collectSymbols, resolvePosition } from "../lsp-core.js";
+import { uriToPath, findSymbolPosition, formatDiagnostic, filterDiagnosticsBySeverity, collectSymbols, resolvePosition } from "../lsp-core.ts";
 
 // ============================================================================
 // uriToPath tests

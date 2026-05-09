@@ -29,7 +29,7 @@ import { Type, type Static } from "@sinclair/typebox";
 import { StringEnum } from "@mariozechner/pi-ai";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
-import { getOrCreateManager, shutdownManager, LSP_SERVERS, formatDiagnostic, filterDiagnosticsBySeverity, uriToPath, resolvePosition, collectSymbols, diagnosticsWaitMsForFile, getCppCompilationDbHint, type SeverityFilter } from "./lsp-core.js";
+import { getOrCreateManager, shutdownManager, LSP_SERVERS, formatDiagnostic, filterDiagnosticsBySeverity, uriToPath, resolvePosition, collectSymbols, diagnosticsWaitMsForFile, getCppCompilationDbHint, type SeverityFilter } from "./lsp-core.ts";
 
 const PREVIEW_LINES = 10;
 

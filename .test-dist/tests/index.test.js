@@ -1,0 +1,317 @@
+/**
+ * Unit tests for index.ts formatting functions
+ */
+// ============================================================================
+// Test utilities
+// ============================================================================
+const tests = [];
+function test(name, fn) {
+    tests.push({ name, fn });
+}
+function assertEqual(actual, expected, message) {
+    const a = JSON.stringify(actual);
+    const e = JSON.stringify(expected);
+    if (a !== e)
+        throw new Error(message || `Expected ${e}, got ${a}`);
+}
+// ============================================================================
+// Import the module to test internal functions
+// We need to test via the execute function since formatters are private
+// Or we can extract and test the logic directly
+// ============================================================================
+import { mkdtemp, rm, writeFile } from "fs/promises";
+import { tmpdir } from "os";
+import { join } from "path";
+import { uriToPath, findSymbolPosition, formatDiagnostic, filterDiagnosticsBySeverity, collectSymbols, resolvePosition } from "../lsp-core.js";
+// ============================================================================
+// uriToPath tests
+// ============================================================================
+test("uriToPath: converts file:// URI to path", () => {
+    const result = uriToPath("file:///Users/test/file.ts");
+    assertEqual(result, "/Users/test/file.ts");
+});
+test("uriToPath: handles encoded characters", () => {
+    const result = uriToPath("file:///Users/test/my%20file.ts");
+    assertEqual(result, "/Users/test/my file.ts");
+});
+test("uriToPath: passes through non-file URIs", () => {
+    const result = uriToPath("/some/path.ts");
+    assertEqual(result, "/some/path.ts");
+});
+test("uriToPath: handles invalid URIs gracefully", () => {
+    const result = uriToPath("not-a-valid-uri");
+    assertEqual(result, "not-a-valid-uri");
+});
+// ============================================================================
+// findSymbolPosition tests
+// ============================================================================
+test("findSymbolPosition: finds exact match", () => {
+    const symbols = [
+        { name: "greet", range: { start: { line: 5, character: 10 }, end: { line: 5, character: 15 } }, selectionRange: { start: { line: 5, character: 10 }, end: { line: 5, character: 15 } }, kind: 12, children: [] },
+        { name: "hello", range: { start: { line: 10, character: 0 }, end: { line: 10, character: 5 } }, selectionRange: { start: { line: 10, character: 0 }, end: { line: 10, character: 5 } }, kind: 12, children: [] },
+    ];
+    const pos = findSymbolPosition(symbols, "greet");
+    assertEqual(pos, { line: 5, character: 10 });
+});
+test("findSymbolPosition: finds partial match", () => {
+    const symbols = [
+        { name: "getUserName", range: { start: { line: 3, character: 0 }, end: { line: 3, character: 11 } }, selectionRange: { start: { line: 3, character: 0 }, end: { line: 3, character: 11 } }, kind: 12, children: [] },
+    ];
+    const pos = findSymbolPosition(symbols, "user");
+    assertEqual(pos, { line: 3, character: 0 });
+});
+test("findSymbolPosition: prefers exact over partial", () => {
+    const symbols = [
+        { name: "userName", range: { start: { line: 1, character: 0 }, end: { line: 1, character: 8 } }, selectionRange: { start: { line: 1, character: 0 }, end: { line: 1, character: 8 } }, kind: 12, children: [] },
+        { name: "user", range: { start: { line: 5, character: 0 }, end: { line: 5, character: 4 } }, selectionRange: { start: { line: 5, character: 0 }, end: { line: 5, character: 4 } }, kind: 12, children: [] },
+    ];
+    const pos = findSymbolPosition(symbols, "user");
+    assertEqual(pos, { line: 5, character: 0 });
+});
+test("findSymbolPosition: searches nested children", () => {
+    const symbols = [
+        {
+            name: "MyClass",
+            range: { start: { line: 0, character: 0 }, end: { line: 10, character: 0 } },
+            selectionRange: { start: { line: 0, character: 0 }, end: { line: 0, character: 7 } },
+            kind: 5,
+            children: [
+                { name: "myMethod", range: { start: { line: 2, character: 2 }, end: { line: 4, character: 2 } }, selectionRange: { start: { line: 2, character: 2 }, end: { line: 2, character: 10 } }, kind: 6, children: [] },
+            ]
+        },
+    ];
+    const pos = findSymbolPosition(symbols, "myMethod");
+    assertEqual(pos, { line: 2, character: 2 });
+});
+test("findSymbolPosition: returns null for no match", () => {
+    const symbols = [
+        { name: "foo", range: { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } }, selectionRange: { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } }, kind: 12, children: [] },
+    ];
+    const pos = findSymbolPosition(symbols, "bar");
+    assertEqual(pos, null);
+});
+test("findSymbolPosition: case insensitive", () => {
+    const symbols = [
+        { name: "MyFunction", range: { start: { line: 0, character: 0 }, end: { line: 0, character: 10 } }, selectionRange: { start: { line: 0, character: 0 }, end: { line: 0, character: 10 } }, kind: 12, children: [] },
+    ];
+    const pos = findSymbolPosition(symbols, "myfunction");
+    assertEqual(pos, { line: 0, character: 0 });
+});
+// ============================================================================
+// formatDiagnostic tests
+// ============================================================================
+test("formatDiagnostic: formats error", () => {
+    const diag = {
+        range: { start: { line: 5, character: 10 }, end: { line: 5, character: 15 } },
+        message: "Type 'number' is not assignable to type 'string'",
+        severity: 1,
+    };
+    const result = formatDiagnostic(diag);
+    assertEqual(result, "ERROR [6:11] Type 'number' is not assignable to type 'string'");
+});
+test("formatDiagnostic: formats warning", () => {
+    const diag = {
+        range: { start: { line: 0, character: 0 }, end: { line: 0, character: 5 } },
+        message: "Unused variable",
+        severity: 2,
+    };
+    const result = formatDiagnostic(diag);
+    assertEqual(result, "WARN [1:1] Unused variable");
+});
+test("formatDiagnostic: formats info", () => {
+    const diag = {
+        range: { start: { line: 2, character: 4 }, end: { line: 2, character: 10 } },
+        message: "Consider using const",
+        severity: 3,
+    };
+    const result = formatDiagnostic(diag);
+    assertEqual(result, "INFO [3:5] Consider using const");
+});
+test("formatDiagnostic: formats hint", () => {
+    const diag = {
+        range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } },
+        message: "Prefer arrow function",
+        severity: 4,
+    };
+    const result = formatDiagnostic(diag);
+    assertEqual(result, "HINT [1:1] Prefer arrow function");
+});
+// ============================================================================
+// filterDiagnosticsBySeverity tests
+// ============================================================================
+test("filterDiagnosticsBySeverity: all returns everything", () => {
+    const diags = [
+        { severity: 1, message: "error", range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } } },
+        { severity: 2, message: "warning", range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } } },
+        { severity: 3, message: "info", range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } } },
+        { severity: 4, message: "hint", range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } } },
+    ];
+    const result = filterDiagnosticsBySeverity(diags, "all");
+    assertEqual(result.length, 4);
+});
+test("filterDiagnosticsBySeverity: error returns only errors", () => {
+    const diags = [
+        { severity: 1, message: "error", range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } } },
+        { severity: 2, message: "warning", range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } } },
+    ];
+    const result = filterDiagnosticsBySeverity(diags, "error");
+    assertEqual(result.length, 1);
+    assertEqual(result[0].message, "error");
+});
+test("filterDiagnosticsBySeverity: warning returns errors and warnings", () => {
+    const diags = [
+        { severity: 1, message: "error", range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } } },
+        { severity: 2, message: "warning", range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } } },
+        { severity: 3, message: "info", range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } } },
+    ];
+    const result = filterDiagnosticsBySeverity(diags, "warning");
+    assertEqual(result.length, 2);
+});
+test("filterDiagnosticsBySeverity: info returns errors, warnings, and info", () => {
+    const diags = [
+        { severity: 1, message: "error", range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } } },
+        { severity: 2, message: "warning", range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } } },
+        { severity: 3, message: "info", range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } } },
+        { severity: 4, message: "hint", range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } } },
+    ];
+    const result = filterDiagnosticsBySeverity(diags, "info");
+    assertEqual(result.length, 3);
+});
+// ============================================================================
+// collectSymbols tests
+// ============================================================================
+test("collectSymbols: uses selectionRange start for reported position", () => {
+    // selectionRange.start (character 5) differs from range.start (character 0)
+    const symbols = [
+        { name: "foo", kind: 12, range: { start: { line: 0, character: 0 }, end: { line: 2, character: 0 } }, selectionRange: { start: { line: 0, character: 5 }, end: { line: 0, character: 8 } }, children: [] },
+    ];
+    const lines = collectSymbols(symbols);
+    assertEqual(lines[0], "foo (1:6)");
+});
+test("collectSymbols: falls back to range when selectionRange is absent", () => {
+    const symbols = [
+        { name: "foo", kind: 12, range: { start: { line: 0, character: 3 }, end: { line: 0, character: 6 } }, children: [] },
+    ];
+    const lines = collectSymbols(symbols);
+    assertEqual(lines[0], "foo (1:4)");
+});
+test("collectSymbols: converts 0-indexed positions to 1-indexed", () => {
+    const symbols = [
+        { name: "foo", kind: 12, range: { start: { line: 4, character: 0 }, end: { line: 4, character: 3 } }, selectionRange: { start: { line: 4, character: 0 }, end: { line: 4, character: 3 } }, children: [] },
+    ];
+    const lines = collectSymbols(symbols);
+    assertEqual(lines[0], "foo (5:1)");
+});
+test("collectSymbols: formats multiple symbols in order", () => {
+    const symbols = [
+        { name: "bar", kind: 12, range: { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } }, selectionRange: { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } }, children: [] },
+        { name: "baz", kind: 12, range: { start: { line: 5, character: 0 }, end: { line: 5, character: 3 } }, selectionRange: { start: { line: 5, character: 0 }, end: { line: 5, character: 3 } }, children: [] },
+    ];
+    const lines = collectSymbols(symbols);
+    assertEqual(lines.length, 2);
+    assertEqual(lines[0], "bar (1:1)");
+    assertEqual(lines[1], "baz (6:1)");
+});
+test("collectSymbols: filters by query (case-insensitive)", () => {
+    const symbols = [
+        { name: "foo", kind: 12, range: { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } }, selectionRange: { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } }, children: [] },
+        { name: "fooBar", kind: 12, range: { start: { line: 1, character: 0 }, end: { line: 1, character: 6 } }, selectionRange: { start: { line: 1, character: 0 }, end: { line: 1, character: 6 } }, children: [] },
+        { name: "baz", kind: 12, range: { start: { line: 2, character: 0 }, end: { line: 2, character: 3 } }, selectionRange: { start: { line: 2, character: 0 }, end: { line: 2, character: 3 } }, children: [] },
+    ];
+    const lines = collectSymbols(symbols, 0, [], "FOO");
+    assertEqual(lines.length, 2);
+    assertEqual(lines[0], "foo (1:1)");
+    assertEqual(lines[1], "fooBar (2:1)");
+});
+test("collectSymbols: recurses into children with indentation", () => {
+    const symbols = [
+        {
+            name: "MyStruct", kind: 23,
+            range: { start: { line: 0, character: 0 }, end: { line: 5, character: 0 } },
+            selectionRange: { start: { line: 0, character: 0 }, end: { line: 0, character: 8 } },
+            children: [
+                { name: "field", kind: 8, range: { start: { line: 1, character: 2 }, end: { line: 1, character: 7 } }, selectionRange: { start: { line: 1, character: 2 }, end: { line: 1, character: 7 } }, children: [] },
+            ],
+        },
+    ];
+    const lines = collectSymbols(symbols);
+    assertEqual(lines.length, 2);
+    assertEqual(lines[0], "MyStruct (1:1)");
+    assertEqual(lines[1], "  field (2:3)");
+});
+test("collectSymbols: returns empty array for no symbols", () => {
+    const lines = collectSymbols([]);
+    assertEqual(lines.length, 0);
+});
+test("resolvePosition: refines C++ function position to identifier token", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "lsp-resolve-"));
+    try {
+        const file = join(dir, "mylib.cpp");
+        await writeFile(file, "std::string get_greeting(const std::string& name) {\n  return name;\n}\n");
+        const pos = await resolvePosition({
+            getDocumentSymbols: async () => ([
+                {
+                    name: "get_greeting",
+                    kind: 12,
+                    range: { start: { line: 0, character: 0 }, end: { line: 2, character: 1 } },
+                    selectionRange: { start: { line: 0, character: 0 }, end: { line: 0, character: 11 } },
+                    children: [],
+                },
+            ]),
+            resolveFilePath: () => file,
+        }, file, "get_greeting");
+        assertEqual(pos, { line: 1, column: 13 });
+    }
+    finally {
+        await rm(dir, { recursive: true, force: true }).catch(() => { });
+    }
+});
+test("resolvePosition: partial query refines to matched symbol name", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "lsp-resolve-"));
+    try {
+        const file = join(dir, "mylib.cpp");
+        await writeFile(file, "std::string get_greeting(const std::string& name) {\n  return name;\n}\n");
+        const pos = await resolvePosition({
+            getDocumentSymbols: async () => ([
+                {
+                    name: "get_greeting",
+                    kind: 12,
+                    range: { start: { line: 0, character: 0 }, end: { line: 2, character: 1 } },
+                    selectionRange: { start: { line: 0, character: 0 }, end: { line: 0, character: 11 } },
+                    children: [],
+                },
+            ]),
+            resolveFilePath: () => file,
+        }, file, "greet");
+        assertEqual(pos, { line: 1, column: 13 });
+    }
+    finally {
+        await rm(dir, { recursive: true, force: true }).catch(() => { });
+    }
+});
+// ============================================================================
+// Run tests
+// ============================================================================
+async function runTests() {
+    console.log("Running index.ts unit tests...\n");
+    let passed = 0;
+    let failed = 0;
+    for (const { name, fn } of tests) {
+        try {
+            await fn();
+            console.log(`  ${name}... ✓`);
+            passed++;
+        }
+        catch (error) {
+            const msg = error instanceof Error ? error.message : String(error);
+            console.log(`  ${name}... ✗`);
+            console.log(`    Error: ${msg}\n`);
+            failed++;
+        }
+    }
+    console.log(`\n${passed} passed, ${failed} failed`);
+    if (failed > 0) {
+        process.exit(1);
+    }
+}
+runTests();
