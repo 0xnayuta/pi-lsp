@@ -11,6 +11,8 @@ import {
   StreamMessageReader,
   StreamMessageWriter,
   type MessageConnection,
+} from "vscode-jsonrpc/node.js";
+import {
   InitializeRequest,
   InitializedNotification,
   DidOpenTextDocumentNotification,

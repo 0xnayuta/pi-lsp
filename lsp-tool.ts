@@ -25,10 +25,10 @@
  */
 
 import * as path from "node:path";
-import { Type, type Static } from "@sinclair/typebox";
-import { StringEnum } from "@mariozechner/pi-ai";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { Text } from "@mariozechner/pi-tui";
+import { Type, type Static } from "typebox";
+import { StringEnum } from "@earendil-works/pi-ai";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 import { getOrCreateManager, shutdownManager, LSP_SERVERS, formatDiagnostic, filterDiagnosticsBySeverity, uriToPath, resolvePosition, collectSymbols, diagnosticsWaitMsForFile, getCppCompilationDbHint, type SeverityFilter } from "./lsp-core.ts";
 
 const PREVIEW_LINES = 10;
